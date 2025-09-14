@@ -6,6 +6,10 @@
  * https://github.com/react-native-community/react-native-template-typescript
  *
  * @format
+ * 
+ * npm install -g npm-check-updates
+ * npx npm-check-updates -u
+    npm install
  */
 
 
