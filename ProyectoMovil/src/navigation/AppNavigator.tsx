@@ -9,6 +9,9 @@ import Login from "../screens/Login";
 import Profile from "../screens/Profile";
 import ServiceDetail from "../screens/ServiceDetail";
 import AddService from "../screens/AddService";
+import { useAuth } from '../contexts/AuthContext';
+import { useEffect, useState } from 'react';
+import { getUserProfile } from '../services/firestoreService';
 import History from "../screens/History";
 // import Chat from "../screens/Chat";
 import { View, Text, Platform } from 'react-native';
@@ -21,6 +24,26 @@ const Tab = createBottomTabNavigator();
 
 function MainTabs() {
     const { colors } = useTheme();
+    const { user } = useAuth();
+    const [isProvider, setIsProvider] = useState(false);
+
+    useEffect(() => {
+        let mounted = true;
+        (async () => {
+            try {
+                const uid = (user as any)?.uid;
+                if (!uid) {
+                    if (mounted) setIsProvider(false);
+                    return;
+                }
+                const p = await getUserProfile(uid);
+                if (mounted) setIsProvider(p?.role === 'provider');
+            } catch (e) {
+                console.warn('MainTabs getUserProfile', e);
+            }
+        })();
+        return () => { mounted = false };
+    }, [user]);
     return (
         <Tab.Navigator
             screenOptions={({ route }: { route: RouteProp<Record<string, object | undefined>, string> }) => ({
@@ -58,8 +81,12 @@ function MainTabs() {
         >
             {/* <Tab.Screen name="Chat" component={Chat} /> */}
             <Tab.Screen name="Explore" component={Home} />
-            <Tab.Screen name="History" component={History} />
-            <Tab.Screen name="Profile" component={Profile} />
+        <Tab.Screen name="History" component={History} />
+        {isProvider && (
+        <Tab.Screen name="CreateService" component={AddService} options={{ title: 'Crear servicio' }} />
+        )}
+        <Tab.Screen name="ActiveService" component={require('../screens/ServicioActivo').default} options={{ title: 'Servicio activo' }} />
+        <Tab.Screen name="Profile" component={Profile} />
         </Tab.Navigator>
     );
 }

@@ -1,5 +1,5 @@
 import React, { useState, useRef } from "react";
-import { Alert, StyleSheet, View, Animated, Text, Pressable, ActivityIndicator } from "react-native";
+import { Alert, StyleSheet, View, Animated, Text, Pressable, ActivityIndicator, ScrollView, Dimensions } from "react-native";
 import CustomButton from "../components/CustomButton";
 import CustomInput from "../components/CustomInput";
 import { useAuth } from "../contexts/AuthContext";
@@ -10,6 +10,10 @@ export default function Login({ navigation }: any) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [name, setName] = useState('');
+    const [phone, setPhone] = useState('');
+    const [avatarUrl, setAvatarUrl] = useState('');
+    const [role, setRole] = useState<'user' | 'provider'>('user');
+    const [gender, setGender] = useState<'male' | 'female' | 'other'>('male');
     const [confirmPassword, setConfirmPassword] = useState('');
     const { login, register } = useAuth();
     const [submitting, setSubmitting] = useState(false);
@@ -49,7 +53,7 @@ export default function Login({ navigation }: any) {
         }
         try {
             setSubmitting(true);
-            await register(email, password);
+            await register(email, password, name, phone, avatarUrl, role, gender);
                 // Después de registrar, navegar al flujo principal
                 navigation.navigate('Main', { screen: 'Explore', params: { correo: email } });
         } catch (error: any) {
@@ -80,6 +84,9 @@ export default function Login({ navigation }: any) {
     const formOpacity = anim.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0, 0.6, 1] });
     const chooserOpacity = anim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
     const chooserScale = anim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.985] });
+    // compute an offset relative to screen height so the form rises a sensible amount on all devices
+    const screenHeight = Dimensions.get('window').height;
+    const formUpOffset = mode !== 'chooser' ? -Math.round(screenHeight * 0.17) : 0;
 
     const { colors } = useTheme();
 
@@ -96,7 +103,8 @@ export default function Login({ navigation }: any) {
                 </Pressable>
             </Animated.View>
 
-            <Animated.View style={[styles.formCard, { opacity: formOpacity, transform: [{ translateY: formTranslateY }], backgroundColor: colors.card }]}> 
+            <Animated.View style={[styles.formCard, { opacity: formOpacity, transform: [{ translateY: formTranslateY }, { translateY: mode !== 'chooser' ? formUpOffset : 0 }], backgroundColor: colors.card }]}> 
+                <ScrollView contentContainerStyle={{ paddingBottom: 18 }} keyboardShouldPersistTaps="handled">
                 <Text style={[styles.formHeader, { color: colors.text }]}>{mode === 'login' ? 'Iniciar sesión' : 'Crear cuenta'}</Text>
                 <Pressable onPress={() => showForm(mode === 'login' ? 'register' : 'login')} style={{ marginBottom: 8 }}>
                     <Text style={[styles.switchText, { color: colors.primary }]}>{mode === 'login' ? '¿Quieres crear una cuenta?' : '¿Ya tienes cuenta? Inicia sesión'}</Text>
@@ -105,6 +113,36 @@ export default function Login({ navigation }: any) {
                 {mode === 'register' && (
                     <Animated.View style={{ opacity: inputAnims[0], transform: [{ translateY: inputAnims[0].interpolate({ inputRange: [0,1], outputRange: [8,0] }) }] }}>
                         <CustomInput type="text" value={name} title="Nombre" onChange={setName} required />
+                    </Animated.View>
+                )}
+                {mode === 'register' && (
+                    <Animated.View style={{ opacity: inputAnims[4] || inputAnims[1], transform: [{ translateY: inputAnims[4] ? inputAnims[4].interpolate({ inputRange: [0,1], outputRange: [8,0] }) : inputAnims[1].interpolate({ inputRange: [0,1], outputRange: [8,0] }) }] }}>
+                        <CustomInput type="number" value={phone} title="Teléfono (opcional)" onChange={setPhone} />
+                    </Animated.View>
+                )}
+                {mode === 'register' && (
+                    <Animated.View style={{ opacity: inputAnims[2], transform: [{ translateY: inputAnims[2].interpolate({ inputRange: [0,1], outputRange: [8,0] }) }] }}>
+                        <CustomInput type="text" value={avatarUrl} title="Avatar URL (opcional)" onChange={setAvatarUrl} />
+                    </Animated.View>
+                )}
+                {mode === 'register' && (
+                    <Animated.View style={{ marginTop: 8 }}>
+                        <Text style={{ marginBottom: 6, color: colors.muted }}>Tipo de cuenta</Text>
+                        <View style={{ flexDirection: 'row' }}>
+                            <Pressable onPress={() => setRole('user')} style={{ marginRight: 12 }}><Text style={{ color: role === 'user' ? colors.primary : colors.muted }}>Usuario</Text></Pressable>
+                            <Pressable onPress={() => setRole('provider')}><Text style={{ color: role === 'provider' ? colors.primary : colors.muted }}>Proveedor</Text></Pressable>
+                        </View>
+                    </Animated.View>
+                )}
+
+                {mode === 'register' && (
+                    <Animated.View style={{ marginTop: 8 }}>
+                        <Text style={{ marginBottom: 6, color: colors.muted }}>Género (para avatar por defecto)</Text>
+                        <View style={{ flexDirection: 'row' }}>
+                            <Pressable onPress={() => setGender('male')} style={{ marginRight: 12 }}><Text style={{ color: gender === 'male' ? colors.primary : colors.muted }}>Hombre</Text></Pressable>
+                            <Pressable onPress={() => setGender('female')} style={{ marginRight: 12 }}><Text style={{ color: gender === 'female' ? colors.primary : colors.muted }}>Mujer</Text></Pressable>
+                            <Pressable onPress={() => setGender('other')}><Text style={{ color: gender === 'other' ? colors.primary : colors.muted }}>Otro</Text></Pressable>
+                        </View>
                     </Animated.View>
                 )}
 
@@ -131,6 +169,7 @@ export default function Login({ navigation }: any) {
 
                     <CustomButton title="Volver" onPress={hideForm} variant="tertiary" />
                 </View>
+                </ScrollView>
             </Animated.View>
             {submitting && (
                 <View style={styles.overlay}>

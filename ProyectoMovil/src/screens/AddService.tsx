@@ -1,9 +1,26 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, Switch, Button, Alert, ScrollView } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
-import { saveService } from '../services/firestoreService';
+import { saveService, getUserProfile } from '../services/firestoreService';
+import { useAuth } from '../contexts/AuthContext';
+import { useEffect } from 'react';
 
 const AddService: React.FC = () => {
+  const { user } = useAuth();
+  const [isProvider, setIsProvider] = React.useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const uid = (user as any)?.uid;
+        if (!uid) { if (mounted) setIsProvider(false); return; }
+        const p = await getUserProfile(uid);
+        if (mounted) setIsProvider(p?.role === 'provider');
+      } catch (e) { console.warn('AddService getUserProfile', e); }
+    })();
+    return () => { mounted = false };
+  }, [user]);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [price, setPrice] = useState('');
@@ -54,6 +71,15 @@ const AddService: React.FC = () => {
   };
 
   const { colors } = useTheme();
+
+  if (!isProvider) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}> 
+        <Text style={{ fontSize: 18, fontWeight: '700', marginBottom: 8 }}>Acceso restringido</Text>
+        <Text style={{ color: colors.muted }}>Solo las cuentas de proveedor pueden crear servicios. Ve a tu perfil para cambiar tu tipo de cuenta o solicita acceso.</Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView contentContainerStyle={[styles.container, { backgroundColor: colors.background }]} keyboardShouldPersistTaps="handled">

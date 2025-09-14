@@ -18,6 +18,7 @@ export default function ServiceDetail({ route, navigation }: any) {
     const [province, setProvince] = useState('');
     const [postalCode, setPostalCode] = useState('');
     const [country, setCountry] = useState('');
+    const [selectedAddressIndex, setSelectedAddressIndex] = useState<number | null>(null);
     const [loadingReservations, setLoadingReservations] = useState(false);
     const [reservations, setReservations] = useState<any[]>([]);
     const [profile, setProfile] = useState<any | null>(null);
@@ -48,7 +49,16 @@ export default function ServiceDetail({ route, navigation }: any) {
                     setProfile(p || null);
                     if (p) {
                         if (p.displayName && !name) setName(p.displayName);
-                        if (p.address) {
+                        // If user has addresses array, pick first by default
+                        if (p.addresses && Array.isArray(p.addresses) && p.addresses.length > 0) {
+                            const a = p.addresses[0];
+                            setSelectedAddressIndex(0);
+                            setAddressLine(a.addressLine || '');
+                            setCity(a.city || '');
+                            setProvince(a.province || '');
+                            setPostalCode(a.postalCode || '');
+                            setCountry(a.country || '');
+                        } else if (p.address) {
                             const a = p.address as any;
                             if (a.addressLine) setAddressLine(a.addressLine);
                             if (a.city) setCity(a.city);
@@ -69,6 +79,30 @@ export default function ServiceDetail({ route, navigation }: any) {
         if (!name || !date) {
             Alert.alert('Error', 'Por favor completa nombre y fecha');
             return;
+        }
+
+        // Enforce at least one saved location for authenticated users
+        const uid = (user as any)?.uid;
+        if (uid) {
+            const hasSavedAddresses = profile && Array.isArray(profile.addresses) && profile.addresses.length > 0;
+            if (!hasSavedAddresses) {
+                Alert.alert(
+                    'Falta ubicación',
+                    'Debes agregar al menos una ubicación en tu perfil antes de reservar.',
+                    [
+                        // Profile is a screen inside the Main tab navigator - navigate to Main and select Profile
+                        { text: 'Agregar ahora', onPress: () => navigation.navigate('Main', { screen: 'Profile' }) },
+                        { text: 'Cancelar', style: 'cancel' }
+                    ]
+                );
+                return;
+            }
+        } else {
+            // For non-authenticated users, require filling at least the address line in the form
+            if (!addressLine) {
+                Alert.alert('Falta dirección', 'Debes especificar la dirección de destino.');
+                return;
+            }
         }
         try {
             const serviceId = service?.id || service?.key || service;
@@ -188,11 +222,30 @@ export default function ServiceDetail({ route, navigation }: any) {
                                 <TextInput placeholder="Nota adicional" value={note} onChangeText={setNote} style={[styles.input, { height: 80, backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.text }]} multiline placeholderTextColor={colors.muted} />
 
                     <Text style={[styles.fieldLabel, { color: colors.muted, marginTop: 8 }]}>Dirección de destino</Text>
-                    <TextInput placeholder="Calle, número, apto" value={addressLine} onChangeText={setAddressLine} style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.text }]} placeholderTextColor={colors.muted} />
-                    <TextInput placeholder="Ciudad" value={city} onChangeText={setCity} style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.text }]} placeholderTextColor={colors.muted} />
-                    <TextInput placeholder="Provincia / Estado" value={province} onChangeText={setProvince} style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.text }]} placeholderTextColor={colors.muted} />
-                    <TextInput placeholder="Código postal" value={postalCode} onChangeText={setPostalCode} style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.text }]} placeholderTextColor={colors.muted} />
-                    <TextInput placeholder="País" value={country} onChangeText={setCountry} style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.text }]} placeholderTextColor={colors.muted} />
+                        {profile?.addresses && Array.isArray(profile.addresses) && profile.addresses.length > 0 ? (
+                            <View>
+                                <Text style={{ color: colors.muted, marginBottom: 6 }}>Usar una dirección guardada</Text>
+                                {profile.addresses.map((a: any, i: number) => (
+                                    <TouchableOpacity key={i} onPress={() => {
+                                        setSelectedAddressIndex(i);
+                                        setAddressLine(a.addressLine || '');
+                                        setCity(a.city || '');
+                                        setProvince(a.province || '');
+                                        setPostalCode(a.postalCode || '');
+                                        setCountry(a.country || '');
+                                    }} style={{ padding: 10, borderRadius: 8, backgroundColor: selectedAddressIndex === i ? colors.primary : colors.card, marginBottom: 8 }}>
+                                        <Text style={{ color: selectedAddressIndex === i ? '#fff' : colors.text }}>{a.label || `Ubicación ${i+1}`}</Text>
+                                        <Text style={{ color: selectedAddressIndex === i ? '#fff' : colors.muted, fontSize: 12 }}>{a.addressLine}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        ) : null}
+
+                        <TextInput placeholder="Calle, número, apto" value={addressLine} onChangeText={setAddressLine} style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.text }]} placeholderTextColor={colors.muted} />
+                        <TextInput placeholder="Ciudad" value={city} onChangeText={setCity} style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.text }]} placeholderTextColor={colors.muted} />
+                        <TextInput placeholder="Provincia / Estado" value={province} onChangeText={setProvince} style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.text }]} placeholderTextColor={colors.muted} />
+                        <TextInput placeholder="Código postal" value={postalCode} onChangeText={setPostalCode} style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.text }]} placeholderTextColor={colors.muted} />
+                        <TextInput placeholder="País" value={country} onChangeText={setCountry} style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.text }]} placeholderTextColor={colors.muted} />
                 </View>
 
                 <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>

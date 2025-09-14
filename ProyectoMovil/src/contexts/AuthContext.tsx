@@ -12,7 +12,7 @@ const AuthContext = createContext<{
     isAllowed: Boolean,
     loading: boolean,
     login: (email: string, password: string) => Promise<void>,
-    register: (email: string, password: string) => Promise<void>,
+    register: (email: string, password: string, name?: string, phone?: string, avatarUrl?: string, role?: string, gender?: 'male' | 'female' | 'other') => Promise<void>,
     logout: () => void,
 } | null>(null);
 
@@ -58,17 +58,35 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         }
     };
 
-    const register = async (email: string, password: string) => {
+    const register = async (email: string, password: string, name?: string, phone?: string, avatarUrl?: string, role?: string, gender?: 'male' | 'female' | 'other') => {
         try {
             const userCredential = await auth().createUserWithEmailAndPassword(email, password);
             const u = userCredential.user;
+            // actualizar displayName en Firebase Auth si se proporcionó
+            if (name) {
+                try {
+                    await u.updateProfile({ displayName: name });
+                } catch (e) {
+                    console.warn('updateProfile error', e);
+                }
+            }
             setUser({ uid: u.uid, email: u.email ?? '' });
             setIsAllowed(true);
             // Crear documento de usuario básico
             try {
+                // if avatarUrl is not provided, choose a sensible default based on gender
+                const defaultMale = 'https://cdn-icons-png.flaticon.com/512/1077/1077114.png';
+                const defaultFemale = 'https://cdn-icons-png.flaticon.com/512/194/194938.png';
+                const defaultOther = 'https://cdn-icons-png.flaticon.com/512/4128/4128176.png';
+                const chosenAvatar = avatarUrl && avatarUrl.length > 0 ? avatarUrl : (gender === 'female' ? defaultFemale : gender === 'male' ? defaultMale : defaultOther);
+
                 await firestore().collection('users').doc(u.uid).set({
                     email: u.email,
-                    displayName: u.displayName || '',
+                    displayName: name || u.displayName || '',
+                    name: name || u.displayName || '',
+                    phone: phone || '',
+                    avatarUrl: chosenAvatar,
+                    role: role || 'user',
                     createdAt: firestore.FieldValue.serverTimestamp(),
                 }, { merge: true });
             } catch (e) {
