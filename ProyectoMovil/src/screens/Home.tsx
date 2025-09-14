@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity, FlatList, Modal, Pressable } from "react-native";
 import { useAuth } from "../contexts/AuthContext";
+import firestore from '@react-native-firebase/firestore';
 import CustomButton from "../components/CustomButton";
 import CustomInput from "../components/CustomInput";
 import { useTheme } from "../contexts/ThemeContext";
@@ -18,13 +19,44 @@ export default function Home({ navigation }: any) {
         { id: '5', title: 'Mudanzas', icon: 'https://cdn-icons-png.flaticon.com/512/2991/2991148.png' },
     ];
 
-    const services = [
+    const [services, setServices] = useState<Array<any>>([
+        // fallback static items while Firestore carga
         { key: 'plumber', title: 'Reparar fuga', price: '$', img: 'https://cdn-icons-png.flaticon.com/512/2921/2921222.png' },
         { key: 'electrician', title: 'Instalar enchufe', price: '$$', img: 'https://cdn-icons-png.flaticon.com/512/2321/2321406.png' },
         { key: 'painter', title: 'Pintura rápida', price: '$$', img: 'https://cdn-icons-png.flaticon.com/512/2965/2965567.png' },
         { key: 'clean', title: 'Limpieza express', price: '$', img: 'https://cdn-icons-png.flaticon.com/512/2913/2913496.png' },
         { key: 'mover', title: 'Ayuda con mudanza', price: '$$$', img: 'https://cdn-icons-png.flaticon.com/512/2991/2991148.png' },
-    ];
+    ]);
+    const [loadingServices, setLoadingServices] = useState(true);
+
+    useEffect(() => {
+        // Suscripción en tiempo real a la colección 'services'
+        const unsubscribe = firestore()
+            .collection('services')
+            .where('active', '==', true)
+            .orderBy('createdAt', 'desc')
+            .onSnapshot(querySnapshot => {
+                const items: any[] = [];
+                querySnapshot.forEach(doc => {
+                    const data = doc.data();
+                    items.push({
+                        id: doc.id,
+                        key: (data.key as string) || doc.id,
+                        title: data.title || data.key || 'Servicio',
+                        img: data.icon || data.img || 'https://cdn-icons-png.flaticon.com/512/854/854878.png',
+                        price: data.price ? String(data.price) : '$',
+                        ...data,
+                    });
+                });
+                setServices(items);
+                setLoadingServices(false);
+            }, error => {
+                console.warn('services onSnapshot error', error);
+                setLoadingServices(false);
+            });
+
+        return () => unsubscribe();
+    }, []);
 
     const [showProfile, setShowProfile] = useState(false);
     const [selected, setSelected] = useState<string | null>(null);

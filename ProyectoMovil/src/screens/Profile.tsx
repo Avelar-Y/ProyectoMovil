@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, Image, Switch } from 'react-native';
+import { View, Text, StyleSheet, Image, Switch, Alert } from 'react-native';
+import { saveReservation } from '../services/firestoreService';
 import CustomButton from '../components/CustomButton';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -17,6 +18,25 @@ export default function Profile({ navigation }: any) {
             <Text style={[styles.email, { color: colors.text }]}>{user?.email || 'Usuario'}</Text>
             <View style={{ marginTop: 20, width: '80%' }}>
                 <CustomButton title="Historial" onPress={() => navigation.navigate('History')} />
+
+                <CustomButton title="Guardar prueba" onPress={async () => {
+                    if (!user?.email) {
+                        Alert.alert('Error', 'No hay usuario logueado');
+                        return;
+                    }
+                    try {
+                        const id = await saveReservation({
+                            userEmail: user.email,
+                            service: 'Prueba Servicio',
+                            name: 'Reserva de prueba',
+                            date: new Date().toISOString(),
+                            note: 'Reservado desde app (test)'
+                        });
+                        Alert.alert('Guardado', `Reserva creada: ${id}`);
+                    } catch (err: any) {
+                        Alert.alert('Error', err?.message || String(err));
+                    }
+                }} variant="primary" />
 
                 <View style={styles.themeRow}>
                     <Text style={{ color: colors.text }}>Tema oscuro</Text>

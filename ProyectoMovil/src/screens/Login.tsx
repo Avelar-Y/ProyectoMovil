@@ -29,9 +29,10 @@ export default function Login({ navigation }: any) {
         try {
             setSubmitting(true);
             await login(email, password);
-            navigation.navigate('HomeScreen', { correo: email });
+                // Navegar al stack principal y seleccionar la pestaña 'Explore' (que contiene Home)
+                navigation.navigate('Main', { screen: 'Explore', params: { correo: email } });
         } catch (error: any) {
-            Alert.alert('Error', error.message);
+            console.log(error);
         } finally {
             setSubmitting(false);
         }
@@ -49,7 +50,8 @@ export default function Login({ navigation }: any) {
         try {
             setSubmitting(true);
             await register(email, password);
-            navigation.navigate('HomeScreen', { correo: email });
+                // Después de registrar, navegar al flujo principal
+                navigation.navigate('Main', { screen: 'Explore', params: { correo: email } });
         } catch (error: any) {
             Alert.alert('Error', error.message);
         } finally {

@@ -1,28 +1,40 @@
 import firestore from '@react-native-firebase/firestore';
+import type { FirebaseFirestoreTypes } from '@react-native-firebase/firestore';
 
-type Reservation = {
+export type Reservation = {
   id?: string;
   userEmail: string;
   service: string;
   name: string;
   date: string;
   note?: string;
-  createdAt: FirebaseFirestoreTypes.Timestamp | any;
+  createdAt?: FirebaseFirestoreTypes.Timestamp | null;
 };
 
 export const saveReservation = async (reservation: Omit<Reservation, 'id' | 'createdAt'>) => {
-  const data = { ...reservation, createdAt: firestore.FieldValue.serverTimestamp() } as any;
-  const docRef = await firestore().collection('reservations').add(data);
-  return docRef.id;
+  try {
+    const data = { ...reservation, createdAt: firestore.FieldValue.serverTimestamp(), createdAtClient: Date.now() } as any;
+    const docRef = await firestore().collection('reservations').add(data);
+    return docRef.id;
+  } catch (err) {
+    console.error('saveReservation error', err);
+    throw err;
+  }
 };
 
-export const getReservationsForUser = async (userEmail: string) => {
-  const snap = await firestore()
-    .collection('reservations')
-    .where('userEmail', '==', userEmail)
-    .orderBy('createdAt', 'desc')
-    .get();
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+export const getReservationsForUser = async (userEmail: string) : Promise<Reservation[]> => {
+  try {
+    // Order by client timestamp for immediate visibility; server timestamp will sync later.
+    const snap = await firestore()
+      .collection('reservations')
+      .where('userEmail', '==', userEmail)
+      .orderBy('createdAtClient', 'desc')
+      .get();
+    return snap.docs.map(d => ({ id: d.id, ...(d.data() as Reservation) }));
+  } catch (err) {
+    console.error('getReservationsForUser error', err);
+    throw err;
+  }
 };
 
 export default {

@@ -1,8 +1,10 @@
-import { createContext, useContext, useEffect, useState } from "react"
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from '@react-native-firebase/auth';
+import { createContext, useContext, useEffect, useState } from "react";
+import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
 
 type User = {
-    email: string,
+    uid: string;
+    email: string;
 } | null;
 
 const AuthContext = createContext<{
@@ -21,10 +23,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const [loading, setLoading] = useState<boolean>(true);
 
     useEffect(() => {
-        const auth = getAuth();
-        const unsub = onAuthStateChanged(auth, (u) => {
+        const unsub = auth().onAuthStateChanged((u: FirebaseAuthTypes.User | null) => {
             if (u) {
-                setUser({ email: u.email ?? '' });
+                setUser({ uid: u.uid, email: u.email ?? '' });
                 setIsAllowed(true);
             } else {
                 setUser(null);
@@ -37,32 +38,53 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const login = async (email: string, password: string) => {
         try {
-            const auth = getAuth();
-            const userCredential = await signInWithEmailAndPassword(auth, email, password);
-            setUser({ email: userCredential.user.email ?? '' });
+            const userCredential = await auth().signInWithEmailAndPassword(email, password);
+            const u = userCredential.user;
+            setUser({ uid: u.uid, email: u.email ?? '' });
             setIsAllowed(true);
+            // Actualizar/crear perfil en users collection
+            try {
+                await firestore().collection('users').doc(u.uid).set({
+                    email: u.email,
+                    displayName: u.displayName || '',
+                    updatedAt: firestore.FieldValue.serverTimestamp(),
+                }, { merge: true });
+            } catch (e) {
+                console.warn('update user doc error', e);
+            }
         } catch (error: any) {
             setIsAllowed(false);
             throw error;
         }
-    }
+    };
+
     const register = async (email: string, password: string) => {
         try {
-            const auth = getAuth();
-            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-            setUser({ email: userCredential.user.email ?? '' });
+            const userCredential = await auth().createUserWithEmailAndPassword(email, password);
+            const u = userCredential.user;
+            setUser({ uid: u.uid, email: u.email ?? '' });
             setIsAllowed(true);
+            // Crear documento de usuario básico
+            try {
+                await firestore().collection('users').doc(u.uid).set({
+                    email: u.email,
+                    displayName: u.displayName || '',
+                    createdAt: firestore.FieldValue.serverTimestamp(),
+                }, { merge: true });
+            } catch (e) {
+                console.warn('create user doc error', e);
+            }
         } catch (error: any) {
             setIsAllowed(false);
             throw error;
         }
-    }
+    };
+
     const logout = async () => {
-        const auth = getAuth();
-        await signOut(auth);
+        await auth().signOut();
         setUser(null);
         setIsAllowed(false);
-    }
+    };
     return (
         <AuthContext.Provider value={{ user, isAllowed, loading, login, register, logout }}>
             {children}
