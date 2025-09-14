@@ -3,26 +3,27 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type ThemeName = 'light' | 'dark';
 
+// Improved palettes for better contrast and legibility
 const LIGHT = {
-  background: '#ffffff',
-  card: '#ffffff',
-  text: '#111827',
-  muted: '#6b7280',
-  primary: '#2563eb',
-  surface: '#f5f6fa',
-  inputBg: '#ffffff',
-  border: '#e6e6e6',
+  background: '#FFFFFF',        // pure white background
+  card: '#F8FAFC',             // slight off-white for cards to separate from background
+  text: '#0F1724',             // darker text for high contrast
+  muted: '#4B5563',            // readable muted color
+  primary: '#1D4ED8',          // strong blue (tailwind blue-700)
+  surface: '#F3F4F6',          // surfaces / footers
+  inputBg: '#FFFFFF',          // inputs remain white with clear border
+  border: '#E5E7EB',           // subtle border
 };
 
 const DARK = {
-  background: '#0b1220',
-  card: '#071022cc',
-  text: '#e6eef8',
-  muted: '#9aa4b2',
-  primary: '#4f8cff',
-  surface: '#071022',
-  inputBg: '#0f1724',
-  border: '#1f2937',
+  background: '#061025',       // deep dark blue/charcoal
+  card: '#07162A',             // slightly lighter than background for cards
+  text: '#E6EEF8',             // soft off-white for text
+  muted: '#9AA4B2',            // muted gray-blue
+  primary: '#3B82F6',          // brighter blue for actions (tailwind blue-500)
+  surface: '#071428',          // surface color
+  inputBg: '#0B1624',         // input background for contrast
+  border: '#1F2A37',          // border in dark mode
 };
 
 const ThemeContext = createContext<{

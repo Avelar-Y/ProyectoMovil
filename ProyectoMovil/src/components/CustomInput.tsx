@@ -39,7 +39,7 @@ export default function CustomInput({ value, title, type = "text", onChange, req
     const error = getError();
     return (
         <View style={{ marginVertical: 6 }}>
-            <View style={[styles.inputContainer, error && styles.inputError]}>
+            <View style={[styles.inputContainer, { backgroundColor: colors.inputBg, borderColor: colors.border }, error && styles.inputError]}>
                 {/* left icon: show a context icon based on type if available */}
                 <View style={styles.leftIcon}>
                     {(() => {
@@ -49,12 +49,12 @@ export default function CustomInput({ value, title, type = "text", onChange, req
                             person: 'https://cdn-icons-png.flaticon.com/512/1077/1077114.png',
                         };
                         const key = type === 'email' ? 'email' : (type === 'password' ? 'password' : 'person');
-                        return <Image source={{ uri: icons[key] }} style={{ width: 20, height: 20, tintColor: '#9fb4ff' }} />
+                        return <Image source={{ uri: icons[key] }} style={{ width: 20, height: 20, tintColor: colors.primary }} />
                     })()}
                 </View>
 
                 <TextInput
-                    style={styles.input}
+                    style={[styles.input, { color: colors.text }]}
                     placeholder={title}
                     value={value}
                     onChangeText={onChange}
@@ -71,7 +71,7 @@ export default function CustomInput({ value, title, type = "text", onChange, req
                             setIsPasswordVisible(!isPasswordVisible);
                             setIsSecureText(!isSecureText);
                         }}>
-                        <Image source={{ uri: isPasswordVisible ? 'https://cdn-icons-png.flaticon.com/512/565/565655.png' : 'https://cdn-icons-png.flaticon.com/512/565/565654.png' }} style={{ width: 22, height: 22, tintColor: '#9fb4ff' }} />
+                        <Image source={{ uri: isPasswordVisible ? 'https://cdn-icons-png.flaticon.com/512/565/565655.png' : 'https://cdn-icons-png.flaticon.com/512/565/565654.png' }} style={{ width: 22, height: 22, tintColor: colors.primary }} />
                     </TouchableOpacity>
                 )}
             </View>
@@ -84,7 +84,6 @@ const styles = StyleSheet.create({
     input: {
         paddingVertical: 10,
         fontSize: 15,
-        color: '#111827',
         flex: 1,
         marginLeft: 6,
     },
@@ -100,11 +99,9 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: '#e6e6e6',
         borderRadius: 10,
         paddingHorizontal: 12,
         paddingVertical: 6,
-        backgroundColor: '#ffffff',
         minHeight: 44,
     },
     leftIcon: {

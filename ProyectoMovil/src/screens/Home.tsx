@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity, FlatList, Modal, Pressable } from "react-native";
+import React, { useState, useEffect, useMemo } from "react";
+import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity, FlatList, Modal, Pressable, ActivityIndicator, Alert } from "react-native";
 import { useAuth } from "../contexts/AuthContext";
+import { saveReservation } from '../services/firestoreService';
 import firestore from '@react-native-firebase/firestore';
 import CustomButton from "../components/CustomButton";
 import CustomInput from "../components/CustomInput";
@@ -19,15 +20,9 @@ export default function Home({ navigation }: any) {
         { id: '5', title: 'Mudanzas', icon: 'https://cdn-icons-png.flaticon.com/512/2991/2991148.png' },
     ];
 
-    const [services, setServices] = useState<Array<any>>([
-        // fallback static items while Firestore carga
-        { key: 'plumber', title: 'Reparar fuga', price: '$', img: 'https://cdn-icons-png.flaticon.com/512/2921/2921222.png' },
-        { key: 'electrician', title: 'Instalar enchufe', price: '$$', img: 'https://cdn-icons-png.flaticon.com/512/2321/2321406.png' },
-        { key: 'painter', title: 'Pintura rápida', price: '$$', img: 'https://cdn-icons-png.flaticon.com/512/2965/2965567.png' },
-        { key: 'clean', title: 'Limpieza express', price: '$', img: 'https://cdn-icons-png.flaticon.com/512/2913/2913496.png' },
-        { key: 'mover', title: 'Ayuda con mudanza', price: '$$$', img: 'https://cdn-icons-png.flaticon.com/512/2991/2991148.png' },
-    ]);
+    const [services, setServices] = useState<Array<any>>([]);
     const [loadingServices, setLoadingServices] = useState(true);
+    const [testSavingId, setTestSavingId] = useState<string | null>(null);
 
     useEffect(() => {
         // Suscripción en tiempo real a la colección 'services'
@@ -45,6 +40,10 @@ export default function Home({ navigation }: any) {
                         title: data.title || data.key || 'Servicio',
                         img: data.icon || data.img || 'https://cdn-icons-png.flaticon.com/512/854/854878.png',
                         price: data.price ? String(data.price) : '$',
+                        description: data.description || data.desc || '',
+                        duration: data.duration || data.time || null,
+                        tags: Array.isArray(data.tags) ? data.tags : [],
+                        createdAtMillis: data.createdAt && data.createdAt.toMillis ? data.createdAt.toMillis() : null,
                         ...data,
                     });
                 });
@@ -57,6 +56,28 @@ export default function Home({ navigation }: any) {
 
         return () => unsubscribe();
     }, []);
+
+    const createTestReservation = async (serviceId: string, serviceTitle?: string) => {
+        if (!user?.email) {
+            Alert.alert('Error', 'No hay usuario logueado');
+            return;
+        }
+        setTestSavingId(serviceId);
+        try {
+            const id = await saveReservation({
+                userEmail: user.email,
+                service: serviceId,
+                name: 'Reserva de prueba',
+                date: new Date().toISOString(),
+                note: `Reservado desde Home (test) - ${serviceTitle || serviceId}`
+            });
+            Alert.alert('Guardado', `Reserva creada: ${id}`);
+        } catch (err: any) {
+            Alert.alert('Error', err?.message || String(err));
+        } finally {
+            setTestSavingId(null);
+        }
+    }
 
     const [showProfile, setShowProfile] = useState(false);
     const [selected, setSelected] = useState<string | null>(null);
@@ -72,9 +93,14 @@ export default function Home({ navigation }: any) {
                         <Text style={[styles.headerTitle, { color: colors.text }]}>Servicios Rápidos</Text>
                     </View>
                 </View>
-                <TouchableOpacity onPress={() => setShowProfile(true)}>
-                    <Image source={{ uri: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.profileIcon} />
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <TouchableOpacity onPress={() => navigation.navigate('AddService')} style={{ marginRight: 12 }}>
+                        <Text style={{ fontSize: 22, color: colors.primary }}>+</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => setShowProfile(true)}>
+                        <Image source={{ uri: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.profileIcon} />
+                    </TouchableOpacity>
+                </View>
             </View>
 
             <View style={{ width: '100%', paddingHorizontal: 20, marginTop: 12 }}>
@@ -122,34 +148,94 @@ export default function Home({ navigation }: any) {
             {/* Choices list (selectable) */}
             <View style={{ width: '100%', paddingHorizontal: 20, marginTop: 12 }}>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>Tu elección</Text>
-                {services.map(s => (
-                    <Pressable key={s.key} style={[styles.choiceRow, { backgroundColor: colors.card }]} onPress={() => setSelected(s.key)}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <Image source={{ uri: s.img }} style={{ width: 44, height: 44, borderRadius: 8, marginRight: 12 }} />
-                            <View>
-                                <Text style={{ color: colors.text, fontWeight: '700' }}>{s.title}</Text>
-                                <Text style={{ color: colors.muted, marginTop: 4, fontSize: 12 }}>Pequeña descripción o tiempo estimado</Text>
-                            </View>
-                        </View>
-                        <View style={{ alignItems: 'flex-end' }}>
-                            <Text style={{ color: colors.muted }}>{s.price}</Text>
-                            <View style={[styles.checkCircle, selected === s.key && { backgroundColor: colors.primary }]}>
-                                {selected === s.key ? <Text style={{ color: '#fff' }}>✓</Text> : null}
-                            </View>
-                        </View>
-                    </Pressable>
-                ))}
+                {loadingServices ? (
+                    <View style={{ padding: 20 }}>
+                        <ActivityIndicator size="large" color={colors.primary} />
+                    </View>
+                ) : (
+                    <FlatList
+                        data={services.filter(s => {
+                            if (!query) return true;
+                            const q = query.toLowerCase();
+                            return (s.title || '').toLowerCase().includes(q) || (s.key || '').toLowerCase().includes(q);
+                        })}
+                        keyExtractor={item => item.id || item.key}
+                        renderItem={({ item }) => {
+                            const isExpanded = selected === (item.key || item.id);
+                            return (
+                                <Pressable style={[styles.choiceRow, { backgroundColor: colors.card }]} onPress={() => setSelected(isExpanded ? null : (item.key || item.id))}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                                        <Image source={{ uri: item.img }} style={{ width: 56, height: 56, borderRadius: 8, marginRight: 12 }} />
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={{ color: colors.text, fontWeight: '700' }}>{item.title}</Text>
+                                            <Text numberOfLines={isExpanded ? undefined : 1} style={{ color: colors.muted, marginTop: 4, fontSize: 12 }}>{item.description || 'Descripción no disponible'}</Text>
+                                            <View style={{ flexDirection: 'row', marginTop: 6, alignItems: 'center' }}>
+                                                {item.duration ? <Text style={{ color: colors.muted, fontSize: 12, marginRight: 10 }}>⏱ {item.duration} min</Text> : null}
+                                                <Text style={{ color: colors.muted, fontSize: 12 }}>{item.price ? `${item.price}` : ''}</Text>
+                                            </View>
+                                            {isExpanded && item.tags && item.tags.length > 0 ? (
+                                                <View style={{ flexDirection: 'row', marginTop: 6, flexWrap: 'wrap' }}>
+                                                    {item.tags.map((t: any, idx: number) => (
+                                                        <View key={idx} style={[styles.tagChip, { backgroundColor: colors.background, borderColor: colors.muted }]}>
+                                                            <Text style={{ fontSize: 11, color: colors.muted }}>{String(t)}</Text>
+                                                        </View>
+                                                    ))}
+                                                </View>
+                                            ) : null}
+                                            {isExpanded && (
+                                                <View style={{ marginTop: 8, flexDirection: 'row', gap: 8 }}>
+                                                    <TouchableOpacity onPress={() => navigation.navigate('ServiceDetail', { service: item })} style={{ paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, backgroundColor: colors.primary }}>
+                                                        <Text style={{ color: '#fff' }}>Ver detalle</Text>
+                                                    </TouchableOpacity>
+                                                    <TouchableOpacity onPress={() => createTestReservation(item.key || item.id, item.title)} style={{ paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, backgroundColor: colors.primary }}>
+                                                        <Text style={{ color: '#fff' }}>Reservar</Text>
+                                                    </TouchableOpacity>
+                                                </View>
+                                            )}
+                                        </View>
+                                    </View>
+                                    <View style={{ alignItems: 'flex-end', marginLeft: 8, justifyContent: 'center' }}>
+                                        <Text style={{ color: colors.muted, fontSize: 12 }}>{item.createdAtMillis ? new Date(item.createdAtMillis).toLocaleDateString() : ''}</Text>
+                                        {!isExpanded && (testSavingId === (item.key || item.id) ? (
+                                            <ActivityIndicator style={{ marginTop: 6 }} />
+                                        ) : (
+                                            <TouchableOpacity onPress={() => createTestReservation(item.key || item.id, item.title)} style={{ marginTop: 8, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: colors.primary }}>
+                                                <Text style={{ color: '#fff', fontSize: 12 }}>Prueba</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                        <View style={[styles.checkCircle, selected === (item.key || item.id) && { backgroundColor: colors.primary, marginTop: 8 }]}>
+                                            {selected === (item.key || item.id) ? <Text style={{ color: '#fff' }}>✓</Text> : null}
+                                        </View>
+                                    </View>
+                                </Pressable>
+                            );
+                        }}
+                    />
+                )}
             </View>
 
             <View style={{ width: '100%', paddingHorizontal: 20, marginTop: 18 }}>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>Servicios recomendados</Text>
                 <View style={styles.grid}>
-                    {services.map(s => (
-                        <TouchableOpacity key={s.key} style={[styles.gridCard, { backgroundColor: colors.card }]} onPress={() => navigation.navigate('ServiceDetail', { service: s.key })}>
-                            <Image source={{ uri: s.img }} style={styles.gridImg} />
-                            <Text style={[styles.gridTitle, { color: colors.text }]}>{s.title}</Text>
-                            <Text style={[styles.gridPrice, { color: colors.muted }]}>{s.price}</Text>
-                        </TouchableOpacity>
+                    {services.slice(0, 6).map((s: any) => (
+                        <View key={s.key || s.id} style={[styles.gridCard, { backgroundColor: colors.card }] }>
+                            <TouchableOpacity style={{ alignItems: 'center', width: '100%' }} onPress={() => navigation.navigate('ServiceDetail', { service: s.key || s.id })}>
+                                <Image source={{ uri: s.img }} style={styles.gridImg} />
+                                <Text style={[styles.gridTitle, { color: colors.text }]}>{s.title}</Text>
+                                <Text style={[styles.gridPrice, { color: colors.muted }]}>{s.price}</Text>
+                                {s.duration ? <Text style={{ color: colors.muted, marginTop: 6, fontSize: 12 }}>Duración: {s.duration} min</Text> : null}
+                                {s.tags && s.tags.length > 0 ? <Text style={{ color: colors.muted, marginTop: 6, fontSize: 11 }}>{s.tags.slice(0,2).join(', ')}</Text> : null}
+                            </TouchableOpacity>
+                            <View style={{ marginTop: 8, width: '100%', alignItems: 'center' }}>
+                                {testSavingId === (s.key || s.id) ? (
+                                    <ActivityIndicator />
+                                ) : (
+                                    <TouchableOpacity onPress={() => createTestReservation(s.key || s.id, s.title)} style={{ paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, backgroundColor: colors.primary }}>
+                                        <Text style={{ color: '#fff', fontSize: 13 }}>Reservar prueba</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        </View>
                     ))}
                 </View>
             </View>
@@ -246,6 +332,7 @@ const styles = StyleSheet.create({
     metricsRow: { marginTop: 12, padding: 12, borderRadius: 10 },
     choiceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderRadius: 10, marginBottom: 10 },
     checkCircle: { width: 26, height: 26, borderRadius: 13, borderWidth: 1, borderColor: '#ddd', alignItems: 'center', justifyContent: 'center', marginTop: 8 },
+    tagChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 1, marginRight: 6, marginBottom: 6 },
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
     modalCard: { padding: 18, borderTopLeftRadius: 16, borderTopRightRadius: 16 },
     modalAvatar: { width: 56, height: 56, borderRadius: 28 },

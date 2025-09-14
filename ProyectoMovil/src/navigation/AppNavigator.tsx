@@ -8,6 +8,7 @@ import Home from "../screens/Home";
 import Login from "../screens/Login";
 import Profile from "../screens/Profile";
 import ServiceDetail from "../screens/ServiceDetail";
+import AddService from "../screens/AddService";
 import History from "../screens/History";
 // import Chat from "../screens/Chat";
 import { View, Text, Platform } from 'react-native';
@@ -69,7 +70,8 @@ export default function AppNavigator({ isLoggedIn }: { isLoggedIn: boolean }) {
             {isLoggedIn ? (
                 <>
                     <Stack.Screen name="Main" component={MainTabs} />
-                    <Stack.Screen name="ServiceDetail" component={ServiceDetail} />
+                        <Stack.Screen name="ServiceDetail" component={ServiceDetail} />
+                        <Stack.Screen name="AddService" component={AddService} />
                 </>
             ) : (
                 <Stack.Screen name="Login" component={Login} />

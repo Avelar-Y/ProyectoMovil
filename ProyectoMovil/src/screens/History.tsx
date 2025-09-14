@@ -16,28 +16,56 @@ export default function History({ navigation }: any) {
             setLoading(false);
             return;
         }
-        const unsubscribe = firestore()
-            .collection('reservations')
-            .where('userEmail', '==', user.email)
-            .orderBy('createdAtClient', 'desc')
-            .onSnapshot(qs => {
-                const items: any[] = [];
-                qs.forEach(d => {
-                    const data = d.data();
-                    // si no hay createdAtClient (doc antiguo), calcular a partir de createdAt
-                    if (!data.createdAtClient && data.createdAt && data.createdAt.toMillis) {
-                        data.createdAtClient = data.createdAt.toMillis();
+        // Intentamos suscripción ordenada; si falla por índice, usamos getReservationsForUser como fallback
+        let unsub = () => {};
+        try {
+            unsub = firestore()
+                .collection('reservations')
+                .where('userEmail', '==', user.email)
+                .orderBy('createdAtClient', 'desc')
+                .onSnapshot(qs => {
+                    const items: any[] = [];
+                    qs.forEach(d => {
+                        const data = d.data();
+                        if (!data.createdAtClient && data.createdAt && data.createdAt.toMillis) {
+                            data.createdAtClient = data.createdAt.toMillis();
+                        }
+                        items.push({ id: d.id, ...(data as any) });
+                    });
+                    setReservations(items);
+                    setLoading(false);
+                }, async err => {
+                    console.warn('reservations onSnapshot error', err);
+                    // Fallback: consultar vía getReservationsForUser
+                    try {
+                        const res = await getReservationsForUser(user.email!);
+                        setReservations(res);
+                    } catch (e) {
+                        console.warn('Fallback getReservationsForUser also failed', e);
                     }
-                    items.push({ id: d.id, ...(data as any) });
+                    setLoading(false);
                 });
-                setReservations(items);
-                setLoading(false);
-            }, err => {
-                console.warn('reservations onSnapshot error', err);
-                setLoading(false);
-            });
+        } catch (err) {
+            console.warn('Error setting up reservations listener, using fallback', err);
+            (async () => {
+                try {
+                    const res = await getReservationsForUser(user.email!);
+                    setReservations(res);
+                } catch (e) {
+                    console.warn('Fallback getReservationsForUser failed', e);
+                } finally {
+                    setLoading(false);
+                }
+            })();
+        }
 
-        return () => unsubscribe();
+        return () => {
+            try {
+                if (typeof unsub === 'function') unsub();
+            } catch (e) {
+                // noop
+            }
+        };
     }, [user]);
 
     useFocusEffect(
