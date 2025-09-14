@@ -225,17 +225,17 @@ export default function ServiceDetail({ route, navigation }: any) {
                     ) : reservations.length === 0 ? (
                         <Text style={{ color: colors.muted }}>No hay reservas para este servicio</Text>
                     ) : (
-                        <FlatList
-                            data={reservations}
-                            keyExtractor={(r: any) => r.id}
-                            renderItem={({ item }: any) => (
-                                <View style={[styles.reservationRow, { borderColor: colors.border }] }>
+                        // Avoid nesting FlatList (VirtualizedList) inside a ScrollView.
+                        // Render a simple mapped list instead (good for small lists).
+                        <View>
+                            {reservations.map((item: any) => (
+                                <View key={item.id} style={[styles.reservationRow, { borderColor: colors.border }] }>
                                     <Text style={{ fontWeight: '700', color: colors.text }}>{item.name}</Text>
                                     <Text style={{ color: colors.muted }}>{item.date}</Text>
                                     <Text style={{ color: colors.muted, fontSize: 12 }}>{item.userEmail}</Text>
                                 </View>
-                            )}
-                        />
+                            ))}
+                        </View>
                     )}
                 </View>
             </View>
