@@ -17,8 +17,9 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { LanguageProvider } from './src/contexts/LanguageContext';
+import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import AppNavigator from './src/navigation/AppNavigator';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 
 class ErrorBoundary extends React.Component<any, { error: any }>{
   constructor(props: any){
@@ -48,7 +49,16 @@ class ErrorBoundary extends React.Component<any, { error: any }>{
 
 // Componente para decidir qué pantalla mostrar según el usuario
 function MainApp() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+  const { colors } = useTheme();
+  if (loading) {
+    return (
+      <View style={[loadingStyles.container, { backgroundColor: colors.background }]}> 
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={{ color: colors.muted, marginTop: 12 }}>Cargando...</Text>
+      </View>
+    );
+  }
   return (
     <NavigationContainer>
       <AppNavigator isLoggedIn={!!user} />
@@ -58,13 +68,15 @@ function MainApp() {
 
 export default function App() {
   return (
-    <LanguageProvider>
-      <AuthProvider>
-        <ErrorBoundary>
-          <MainApp />
-        </ErrorBoundary>
-      </AuthProvider>
-    </LanguageProvider>
+    <ThemeProvider>
+      <LanguageProvider>
+        <AuthProvider>
+          <ErrorBoundary>
+            <MainApp />
+          </ErrorBoundary>
+        </AuthProvider>
+      </LanguageProvider>
+    </ThemeProvider>
   );
 }
 
@@ -73,4 +85,8 @@ const styles = StyleSheet.create({
   errTitle: { fontSize: 20, fontWeight: '700', marginBottom: 8, color: '#b91c1c' },
   errMsg: { color: '#111', marginBottom: 12 },
   errStack: { color: '#444', fontSize: 12 }
+});
+
+const loadingStyles = StyleSheet.create({
+  container: { flex: 1, alignItems: 'center', justifyContent: 'center' }
 });

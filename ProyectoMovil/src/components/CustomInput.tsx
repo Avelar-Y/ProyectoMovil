@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { KeyboardTypeOptions, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import Icon from "react-native-vector-icons/MaterialIcons";
+import { KeyboardTypeOptions, StyleSheet, Text, TextInput, TouchableOpacity, View, Image } from "react-native";
+import { useTheme } from "../contexts/ThemeContext";
 import { i18n } from "../contexts/LanguageContext";
 
 type Props = {
@@ -15,6 +15,7 @@ type Props = {
 export default function CustomInput({ value, title, type = "text", onChange, required }: Props) {
     const [isSecureText, setIsSecureText] = useState(type === 'password');
     const [isPasswordVisible, setIsPasswordVisible] = useState (false);
+    const { colors } = useTheme();
 
     const isPasswordField = type==="password";
     const keyboardType: KeyboardTypeOptions = 
@@ -41,11 +42,15 @@ export default function CustomInput({ value, title, type = "text", onChange, req
             <View style={[styles.inputContainer, error && styles.inputError]}>
                 {/* left icon: show a context icon based on type if available */}
                 <View style={styles.leftIcon}>
-                    <Icon name={
-                        type === 'email' ? 'email' :
-                        type === 'password' ? 'lock' :
-                        'person'
-                    } size={20} color={'#9fb4ff'} />
+                    {(() => {
+                        const icons: Record<string, string> = {
+                            email: 'https://cdn-icons-png.flaticon.com/512/561/561127.png',
+                            password: 'https://cdn-icons-png.flaticon.com/512/3064/3064197.png',
+                            person: 'https://cdn-icons-png.flaticon.com/512/1077/1077114.png',
+                        };
+                        const key = type === 'email' ? 'email' : (type === 'password' ? 'password' : 'person');
+                        return <Image source={{ uri: icons[key] }} style={{ width: 20, height: 20, tintColor: '#9fb4ff' }} />
+                    })()}
                 </View>
 
                 <TextInput
@@ -55,7 +60,7 @@ export default function CustomInput({ value, title, type = "text", onChange, req
                     onChangeText={onChange}
                     secureTextEntry={isSecureText}
                     keyboardType={keyboardType}
-                    placeholderTextColor={'#9aa4b2'}
+                    placeholderTextColor={colors.muted}
                     underlineColorAndroid="transparent"
                 />
 
@@ -66,9 +71,7 @@ export default function CustomInput({ value, title, type = "text", onChange, req
                             setIsPasswordVisible(!isPasswordVisible);
                             setIsSecureText(!isSecureText);
                         }}>
-                        <Icon
-                            name={isPasswordVisible ? 'visibility-off' : 'visibility'}
-                            size={22} color={'#9fb4ff'} />
+                        <Image source={{ uri: isPasswordVisible ? 'https://cdn-icons-png.flaticon.com/512/565/565655.png' : 'https://cdn-icons-png.flaticon.com/512/565/565654.png' }} style={{ width: 22, height: 22, tintColor: '#9fb4ff' }} />
                     </TouchableOpacity>
                 )}
             </View>

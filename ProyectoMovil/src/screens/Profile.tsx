@@ -1,20 +1,34 @@
 import React from 'react';
-import { View, Text, StyleSheet, Image } from 'react-native';
+import { View, Text, StyleSheet, Image, Switch } from 'react-native';
 import CustomButton from '../components/CustomButton';
 import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
 
 export default function Profile({ navigation }: any) {
     const { user, logout } = useAuth();
+    const { colors, themeName, toggle } = useTheme();
 
     return (
-        <View style={styles.container}>
+        <View style={[styles.container, { backgroundColor: colors.background }] }>
             <Image
                 source={{ uri: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }}
                 style={styles.avatar}
             />
-            <Text style={styles.email}>{user?.email || 'Usuario'}</Text>
-            <View style={{ marginTop: 20 }}>
+            <Text style={[styles.email, { color: colors.text }]}>{user?.email || 'Usuario'}</Text>
+            <View style={{ marginTop: 20, width: '80%' }}>
                 <CustomButton title="Historial" onPress={() => navigation.navigate('History')} />
+
+                <View style={styles.themeRow}>
+                    <Text style={{ color: colors.text }}>Tema oscuro</Text>
+                    <Switch
+                        trackColor={{ false: '#767577', true: colors.primary }}
+                        thumbColor={themeName === 'dark' ? '#fff' : '#f4f3f4'}
+                        ios_backgroundColor="#3e3e3e"
+                        onValueChange={() => toggle()}
+                        value={themeName === 'dark'}
+                    />
+                </View>
+
                 <CustomButton title="Cerrar sesión" onPress={async () => { await logout(); }} variant="secondary" />
                 <CustomButton title="Volver" onPress={() => navigation.goBack()} variant="tertiary" />
             </View>
@@ -40,5 +54,14 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: '600',
         color: '#22223b',
+    }
+    ,
+    themeRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingVertical: 10,
+        paddingHorizontal: 6,
+        marginVertical: 8,
     }
 });

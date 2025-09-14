@@ -118,3 +118,7 @@ dependencies {
         implementation jscFlavor
     }
 }
+
+// Copiar las fuentes de react-native-vector-icons al build de Android
+// Esto asegura que los iconos se muestren correctamente en dispositivos Android.
+apply from: "../../node_modules/react-native-vector-icons/fonts.gradle"

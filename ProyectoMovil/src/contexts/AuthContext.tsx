@@ -1,5 +1,5 @@
-import { createContext, useContext, useState } from "react"
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from '@react-native-firebase/auth';
+import { createContext, useContext, useEffect, useState } from "react"
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from '@react-native-firebase/auth';
 
 type User = {
     email: string,
@@ -8,6 +8,7 @@ type User = {
 const AuthContext = createContext<{
     user: User,
     isAllowed: Boolean,
+    loading: boolean,
     login: (email: string, password: string) => Promise<void>,
     register: (email: string, password: string) => Promise<void>,
     logout: () => void,
@@ -17,6 +18,22 @@ const AuthContext = createContext<{
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const [user, setUser] = useState<User>(null);
     const [isAllowed, setIsAllowed] = useState<Boolean>(false);
+    const [loading, setLoading] = useState<boolean>(true);
+
+    useEffect(() => {
+        const auth = getAuth();
+        const unsub = onAuthStateChanged(auth, (u) => {
+            if (u) {
+                setUser({ email: u.email ?? '' });
+                setIsAllowed(true);
+            } else {
+                setUser(null);
+                setIsAllowed(false);
+            }
+            setLoading(false);
+        });
+        return () => unsub();
+    }, []);
 
     const login = async (email: string, password: string) => {
         try {
@@ -47,7 +64,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setIsAllowed(false);
     }
     return (
-        <AuthContext.Provider value={{ user, isAllowed, login, register, logout }}>
+        <AuthContext.Provider value={{ user, isAllowed, loading, login, register, logout }}>
             {children}
         </AuthContext.Provider>
     )

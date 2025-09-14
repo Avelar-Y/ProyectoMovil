@@ -1,5 +1,6 @@
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity } from "react-native";
+import { useTheme } from "../contexts/ThemeContext";
 
 type Props = {
     title: string;
@@ -8,7 +9,8 @@ type Props = {
 }
 // componente con props
 export default function CustomButton ({title, onPress, variant='primary'}: Props){
-    const styles = getStyles(variant);
+    const { colors } = useTheme();
+    const styles = getStyles(variant, colors);
 
     return( 
     <TouchableOpacity  style={styles.button} onPress={onPress} >
@@ -17,22 +19,24 @@ export default function CustomButton ({title, onPress, variant='primary'}: Props
     );
 }
 // funcion con parametros para generar estilos
-const getStyles = (variant: 'primary' | 'secondary' | 'tertiary') => {
-    return StyleSheet.create({
-       button: {
-        height: 45,
-        padding: 12,
-        margin: 10, 
-        borderRadius: 5,
-        backgroundColor:
-          variant === 'primary' ? '#1c1c30' : 
-          variant === 'secondary' ? '#65659c' : 'transparent',
-       }, 
-       text: {
-        color: variant === "primary" || variant === "secondary" ? 
-        '#ededf7' : '#010117',
-        fontWeight: 'bold',
-       },
+const getStyles = (variant: 'primary' | 'secondary' | 'tertiary', colors: any) => {
+     const bg = variant === 'primary' ? colors.primary : variant === 'secondary' ? colors.muted : 'transparent';
+     const textColor = variant === 'primary' || variant === 'secondary' ? colors.text : colors.text;
+     return StyleSheet.create({
+         button: {
+          height: 45,
+          paddingHorizontal: 12,
+          marginVertical: 8,
+          borderRadius: 8,
+          backgroundColor: bg,
+          alignItems: 'center',
+          justifyContent: 'center',
+         }, 
+         text: {
+          color: textColor,
+          fontWeight: '700',
+          fontSize: 15,
+         },
 
-    })
+     })
 }

@@ -1,9 +1,10 @@
 import React, { useState, useRef } from "react";
-import { Alert, StyleSheet, View, Animated, Text, Pressable } from "react-native";
+import { Alert, StyleSheet, View, Animated, Text, Pressable, ActivityIndicator } from "react-native";
 import CustomButton from "../components/CustomButton";
 import CustomInput from "../components/CustomInput";
 import { useAuth } from "../contexts/AuthContext";
 import { i18n } from "../contexts/LanguageContext";
+import { useTheme } from "../contexts/ThemeContext";
 
 export default function Login({ navigation }: any) {
     const [email, setEmail] = useState('');
@@ -11,6 +12,7 @@ export default function Login({ navigation }: any) {
     const [name, setName] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const { login, register } = useAuth();
+    const [submitting, setSubmitting] = useState(false);
 
     const [mode, setMode] = useState<'chooser' | 'login' | 'register'>('chooser');
 
@@ -25,10 +27,13 @@ export default function Login({ navigation }: any) {
             return;
         }
         try {
+            setSubmitting(true);
             await login(email, password);
             navigation.navigate('HomeScreen', { correo: email });
         } catch (error: any) {
             Alert.alert('Error', error.message);
+        } finally {
+            setSubmitting(false);
         }
     };
 
@@ -42,10 +47,13 @@ export default function Login({ navigation }: any) {
             return;
         }
         try {
+            setSubmitting(true);
             await register(email, password);
             navigation.navigate('HomeScreen', { correo: email });
         } catch (error: any) {
             Alert.alert('Error', error.message);
+        } finally {
+            setSubmitting(false);
         }
     };
 
@@ -71,23 +79,25 @@ export default function Login({ navigation }: any) {
     const chooserOpacity = anim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
     const chooserScale = anim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.985] });
 
+    const { colors } = useTheme();
+
     return (
-        <View style={styles.container}>
-            <Animated.View style={[styles.chooserCard, { opacity: chooserOpacity, transform: [{ scale: chooserScale }] }]}> 
-                <Text style={styles.title}>Bienvenido</Text>
-                <Text style={styles.subtitle}>Accede a tu cuenta o crea una nueva</Text>
-                <Pressable style={styles.bigButton} onPress={() => showForm('login')}>
+        <View style={[styles.container, { backgroundColor: colors.background }] }>
+            <Animated.View style={[styles.chooserCard, { opacity: chooserOpacity, transform: [{ scale: chooserScale }], backgroundColor: 'transparent' }]}> 
+                <Text style={[styles.title, { color: colors.text }]}>Bienvenido</Text>
+                <Text style={[styles.subtitle, { color: colors.muted }]}>Accede a tu cuenta o crea una nueva</Text>
+                <Pressable style={[styles.bigButton, { backgroundColor: colors.primary }]} onPress={() => showForm('login')}>
                     <Text style={styles.bigButtonText}>Iniciar sesión</Text>
                 </Pressable>
-                <Pressable style={[styles.bigButton, styles.secondaryBigButton]} onPress={() => showForm('register')}>
-                    <Text style={[styles.bigButtonText, styles.secondaryBigButtonText]}>Crear cuenta</Text>
+                <Pressable style={[styles.bigButton, styles.secondaryBigButton, { borderColor: colors.border }]} onPress={() => showForm('register')}>
+                    <Text style={[styles.bigButtonText, { color: colors.muted }]}>Crear cuenta</Text>
                 </Pressable>
             </Animated.View>
 
-            <Animated.View style={[styles.formCard, { opacity: formOpacity, transform: [{ translateY: formTranslateY }] }]}> 
-                <Text style={styles.formHeader}>{mode === 'login' ? 'Iniciar sesión' : 'Crear cuenta'}</Text>
+            <Animated.View style={[styles.formCard, { opacity: formOpacity, transform: [{ translateY: formTranslateY }], backgroundColor: colors.card }]}> 
+                <Text style={[styles.formHeader, { color: colors.text }]}>{mode === 'login' ? 'Iniciar sesión' : 'Crear cuenta'}</Text>
                 <Pressable onPress={() => showForm(mode === 'login' ? 'register' : 'login')} style={{ marginBottom: 8 }}>
-                    <Text style={styles.switchText}>{mode === 'login' ? '¿Quieres crear una cuenta?' : '¿Ya tienes cuenta? Inicia sesión'}</Text>
+                    <Text style={[styles.switchText, { color: colors.primary }]}>{mode === 'login' ? '¿Quieres crear una cuenta?' : '¿Ya tienes cuenta? Inicia sesión'}</Text>
                 </Pressable>
 
                 {mode === 'register' && (
@@ -120,6 +130,12 @@ export default function Login({ navigation }: any) {
                     <CustomButton title="Volver" onPress={hideForm} variant="tertiary" />
                 </View>
             </Animated.View>
+            {submitting && (
+                <View style={styles.overlay}>
+                    <ActivityIndicator size="large" color={colors.primary} />
+                    <Text style={{ color: colors.muted, marginTop: 10 }}>Procesando...</Text>
+                </View>
+            )}
         </View>
     );
 }
@@ -129,21 +145,18 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: '#f5f6fa',
         padding: 20,
     },
     chooserCard: {
         width: '88%',
-        backgroundColor: '#fff',
         borderRadius: 18,
         paddingVertical: 28,
         paddingHorizontal: 20,
         alignItems: 'center',
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.45,
-        shadowRadius: 12,
-        elevation: 6,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.18,
+        shadowRadius: 8,
         marginBottom: 14,
     },
     title: {
@@ -160,14 +173,10 @@ const styles = StyleSheet.create({
     bigButton: {
         width: '80%',
         paddingVertical: 12,
-        backgroundColor: '#2563eb',
         borderRadius: 10,
         alignItems: 'center',
         marginTop: 10,
-        shadowColor: '#2563eb',
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.22,
-        shadowRadius: 10,
+        marginBottom: 14,
     },
     bigButtonText: {
         color: '#fff',
@@ -205,4 +214,14 @@ const styles = StyleSheet.create({
         marginBottom: 6,
         fontSize: 13,
     },
+    overlay: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: 0,
+        bottom: 0,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0,0,0,0.35)'
+    }
 });
