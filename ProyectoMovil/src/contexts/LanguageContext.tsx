@@ -6,7 +6,7 @@ import { translations } from "../translations/i18n";
 type Language = "es" | "en" | "fr";
 
 const i18n = new I18n(translations);
-i18n.defaultLocale = "fr";
+i18n.defaultLocale = "es";
 i18n.enableFallback = true;
 
 const LanguageContext = createContext<{

@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, StyleSheet, Image, ScrollView } from "react-native";
+import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity } from "react-native";
 import { useAuth } from "../contexts/AuthContext";
 import CustomButton from "../components/CustomButton";
 
@@ -14,7 +14,10 @@ export default function Home({ navigation }: any) {
                     source={{ uri: "https://cdn-icons-png.flaticon.com/512/565/565547.png" }}
                     style={styles.logo}
                 />
-                <Text style={styles.title}>Mivo AR</Text>
+                <Text style={styles.title}>Servicios Rápidos</Text>
+                <TouchableOpacity style={styles.profileBtn} onPress={() => navigation.navigate('Profile')}>
+                    <Image source={{ uri: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.profileIcon} />
+                </TouchableOpacity>
             </View>
 
             {/* Bienvenida */}
@@ -23,30 +26,27 @@ export default function Home({ navigation }: any) {
                 Crea arte urbano y publicidad en el mundo real usando realidad aumentada.
             </Text>
 
-            {/* Cards de funciones */}
-            <View style={styles.cardsContainer}>
-                <View style={styles.card}>
-                    <Image
-                        source={{ uri: "https://cdn-icons-png.flaticon.com/512/1828/1828884.png" }}
-                        style={styles.cardIcon}
-                    />
-                    <Text style={styles.cardTitle}>Crea tu arte</Text>
-                    <Text style={styles.cardDesc}>Diseña y deja tu huella en cualquier espacio urbano.</Text>
-                </View>
-                <View style={styles.card}>
-                    <Image
-                        source={{ uri: "https://cdn-icons-png.flaticon.com/512/854/854878.png" }}
-                        style={styles.cardIcon}
-                    />
-                    <Text style={styles.cardTitle}>Explora campañas</Text>
-                    <Text style={styles.cardDesc}>Descubre arte y publicidad AR cerca de ti.</Text>
-                </View>
+            {/* Servicios rápidos */}
+            <Text style={[styles.subtitle, { marginTop: 6 }]}>Elige un servicio</Text>
+            <View style={styles.servicesContainer}>
+                {[
+                    { key: 'plumber', title: 'Fontanería', icon: 'https://cdn-icons-png.flaticon.com/512/2921/2921222.png' },
+                    { key: 'painter', title: 'Pintor', icon: 'https://cdn-icons-png.flaticon.com/512/2965/2965567.png' },
+                    { key: 'electrician', title: 'Electricista', icon: 'https://cdn-icons-png.flaticon.com/512/2321/2321406.png' },
+                    { key: 'musician', title: 'Músico', icon: 'https://cdn-icons-png.flaticon.com/512/727/727218.png' },
+                    { key: 'field', title: 'Trabajos de campo', icon: 'https://cdn-icons-png.flaticon.com/512/2991/2991148.png' },
+                ].map(s => (
+                    <TouchableOpacity key={s.key} style={styles.serviceCard} onPress={() => navigation.navigate('ServiceDetail', { service: s.key })}>
+                        <Image source={{ uri: s.icon }} style={styles.cardIcon} />
+                        <Text style={styles.cardTitle}>{s.title}</Text>
+                    </TouchableOpacity>
+                ))}
             </View>
 
-            {/* Botón para ir a la cámara AR */}
+            {/* Botón para ir a la cámara AR (placeholder) */}
             <CustomButton
-                title="Entrar a la cámara AR"
-                onPress={() => navigation && navigation.navigate ? navigation.navigate("ARCamera") : null}
+                title="Ver detalles del servicio"
+                onPress={() => Alert && Alert.alert ? Alert.alert('Info', 'Selecciona un servicio para más opciones') : null}
                 variant="primary"
             />
 
@@ -74,7 +74,7 @@ const styles = StyleSheet.create({
     container: {
         alignItems: "center",
         padding: 20,
-        backgroundColor: "#f5f6fa",
+        backgroundColor: "#ffffff",
         flexGrow: 1,
     },
     header: {
@@ -156,5 +156,35 @@ const styles = StyleSheet.create({
         height: 80,
         borderRadius: 10,
         marginRight: 10,
+    },
+    profileBtn: {
+        position: 'absolute',
+        right: 12,
+        top: 4,
+        padding: 6,
+    },
+    profileIcon: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+    },
+    servicesContainer: {
+        width: '100%',
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between',
+    },
+    serviceCard: {
+        backgroundColor: '#f8fafc',
+        borderRadius: 12,
+        padding: 12,
+        alignItems: 'center',
+        width: '30%',
+        marginVertical: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 4,
+        elevation: 2,
     },
 });
