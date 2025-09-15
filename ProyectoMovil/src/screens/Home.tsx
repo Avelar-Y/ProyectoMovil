@@ -185,38 +185,40 @@ export default function Home({ navigation }: any) {
         </View>
       ) : null}
 
-      {/* Main services list
-      <FlatList
-        data={filteredServices}
-        keyExtractor={item => item.id || item.key}
-        contentContainerStyle={styles.container}
-        renderItem={renderService}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        ListFooterComponent={<View style={{ height: 120 }} />}
-      />
+      {/*
+        Main services list
+        <FlatList
+          data={filteredServices}
+          keyExtractor={item => item.id || item.key}
+          contentContainerStyle={styles.container}
+          renderItem={renderService}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          ListFooterComponent={<View style={{ height: 120 }} />}
+        />
 
-      <Modal visible={showProfile} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card }] }>
-            <Text style={{ color: colors.text, fontWeight: '700' }}>{user?.email || 'Usuario'}</Text>
-            <View style={{ marginTop: 12 }}>
-              <Pressable onPress={() => { setShowProfile(false); }} style={styles.modalButton}><Text>Cerrar</Text></Pressable>
-              <Pressable onPress={async () => { await logout(); setShowProfile(false); }} style={[styles.modalButton, { backgroundColor: colors.primary }]}><Text style={{ color: '#fff' }}>Cerrar sesión</Text></Pressable>
+        <Modal visible={showProfile} animationType="slide" transparent>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalCard, { backgroundColor: colors.card }] }>
+              <Text style={{ color: colors.text, fontWeight: '700' }}>{user?.email || 'Usuario'}</Text>
+              <View style={{ marginTop: 12 }}>
+                <Pressable onPress={() => { setShowProfile(false); }} style={styles.modalButton}><Text>Cerrar</Text></Pressable>
+                <Pressable onPress={async () => { await logout(); setShowProfile(false); }} style={[styles.modalButton, { backgroundColor: colors.primary }]}><Text style={{ color: '#fff' }}>Cerrar sesión</Text></Pressable>
+              </View>
             </View>
           </View>
-        </View>
-      </Modal> 
+        </Modal>
 
-      <View style={[styles.bottomBar, { backgroundColor: colors.surface }] }>
-        <View style={[styles.balanceBox, { backgroundColor: colors.card }] }>
-          <Text style={{ color: colors.muted, fontSize: 12 }}>Tu balance</Text>
-          <Text style={{ color: colors.text, fontWeight: '700', marginTop: 6 }}>--</Text>
+        <View style={[styles.bottomBar, { backgroundColor: colors.surface }] }>
+          <View style={[styles.balanceBox, { backgroundColor: colors.card }] }>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>Tu balance</Text>
+            <Text style={{ color: colors.text, fontWeight: '700', marginTop: 6 }}>--</Text>
+          </View>
+          <View style={styles.ctaWrapper}>
+            <CustomButton title="Pedir ahora" onPress={() => navigation.navigate('ServiceDetail')} />
+          </View>
         </View>
-        <View style={styles.ctaWrapper}>
-          <CustomButton title="Pedir ahora" onPress={() => navigation.navigate('ServiceDetail')} />
-        </View>
-      </View>*/}
+      */}
     </View>
   );
 }

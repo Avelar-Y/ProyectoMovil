@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Image, TextInput, Alert, FlatList, ActivityIndicator, ScrollView, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, StyleSheet, Image, TextInput, Alert, FlatList, ActivityIndicator, ScrollView, TouchableOpacity, Platform, Linking } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../contexts/ThemeContext';
 import CustomButton from '../components/CustomButton';
@@ -8,7 +8,7 @@ import { saveReservation, getReservationsForService, getUserProfile, updateUserP
 
 export default function ServiceDetail({ route, navigation }: any) {
     const { service } = route.params || { service: null };
-    const [name, setName] = useState('');
+    // name field removed from form: we'll use authenticated profile name or email
     const [date, setDate] = useState('');
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [pickerDate, setPickerDate] = useState<Date>(new Date());
@@ -22,6 +22,7 @@ export default function ServiceDetail({ route, navigation }: any) {
     const [loadingReservations, setLoadingReservations] = useState(false);
     const [reservations, setReservations] = useState<any[]>([]);
     const [profile, setProfile] = useState<any | null>(null);
+    const [serviceOwner, setServiceOwner] = useState<any | null>(null);
     const { user } = useAuth();
 
     useEffect(() => {
@@ -33,6 +34,15 @@ export default function ServiceDetail({ route, navigation }: any) {
                 const idOrKey = service.id || service.key || service;
                 const res = await getReservationsForService(idOrKey);
                 if (mounted) setReservations(res || []);
+                // load service owner info if available
+                try {
+                    if (service.ownerId) {
+                        const so = await getUserProfile(service.ownerId);
+                        if (mounted) setServiceOwner(so || null);
+                    } else if (service.ownerPhone || service.ownerDisplayName) {
+                        if (mounted) setServiceOwner({ phone: service.ownerPhone, displayName: service.ownerDisplayName });
+                    }
+                } catch (e) { console.warn('Could not load service owner', e); }
             } catch (err) {
                 console.warn('Could not load reservations for service', err);
             } finally {
@@ -44,13 +54,13 @@ export default function ServiceDetail({ route, navigation }: any) {
         (async () => {
             try {
                 const uid = (user as any)?.uid;
-                if (uid) {
+                    if (uid) {
                     const p = await getUserProfile(uid);
                     setProfile(p || null);
                     if (p) {
-                        if (p.displayName && !name) setName(p.displayName);
+                        // previously we prefixed the 'name' input with profile.displayName; input removed
                         // If user has addresses array, pick first by default
-                        if (p.addresses && Array.isArray(p.addresses) && p.addresses.length > 0) {
+                                if (p.addresses && Array.isArray(p.addresses) && p.addresses.length > 0) {
                             const a = p.addresses[0];
                             setSelectedAddressIndex(0);
                             setAddressLine(a.addressLine || '');
@@ -76,8 +86,8 @@ export default function ServiceDetail({ route, navigation }: any) {
     }, [service]);
 
     const handleReserve = async () => {
-        if (!name || !date) {
-            Alert.alert('Error', 'Por favor completa nombre y fecha');
+        if (!date) {
+            Alert.alert('Error', 'Por favor completa la fecha');
             return;
         }
 
@@ -108,12 +118,32 @@ export default function ServiceDetail({ route, navigation }: any) {
             const serviceId = service?.id || service?.key || service;
             const amount = service?.price ?? undefined;
             const currency = 'USD';
+
+            // Prevent providers (non 'user' roles) from reserving
+            try {
+                if (uid) {
+                    const currentProfile = await getUserProfile(uid);
+                    if (currentProfile && currentProfile.role && currentProfile.role !== 'user') {
+                        Alert.alert('Acceso denegado', 'Las cuentas de proveedor no pueden reservar servicios.');
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.warn('Could not verify current user role', e);
+            }
+
+            const computedName = (profile && profile.displayName) ? profile.displayName : (user?.email ?? 'Cliente');
+
             const reservationData: any = {
                 userEmail: user?.email ?? 'unknown',
                 userId: (user as any)?.uid,
                 service: serviceId,
                 serviceSnapshot: { id: service?.id, title: service?.title, price: service?.price },
-                name,
+                // include provider info with the reservation so chat/flows can reference it
+                providerId: service?.ownerId || serviceOwner?.uid || undefined,
+                providerPhone: service?.ownerPhone || serviceOwner?.phone || undefined,
+                providerDisplayName: service?.ownerDisplayName || serviceOwner?.displayName || undefined,
+                name: computedName,
                 date,
                 note,
                 address: {
@@ -132,9 +162,9 @@ export default function ServiceDetail({ route, navigation }: any) {
             const id = await saveReservation(reservationData);
             // Auto-save address in profile if this is the first time (profile exists but had no address)
             try {
-                const uid = (user as any)?.uid;
-                if (uid && (!profile || !profile.address)) {
-                    await updateUserProfile(uid, { address: reservationData.address });
+                const uidInner = (user as any)?.uid;
+                if (uidInner && (!profile || !profile.address)) {
+                    await updateUserProfile(uidInner, { address: reservationData.address });
                     // update local profile state so UI reflects change
                     setProfile({ ...(profile || {}), address: reservationData.address });
                 }
@@ -170,6 +200,22 @@ export default function ServiceDetail({ route, navigation }: any) {
                     </View>
                 </View>
 
+                {/* Provider info block (shows provider name, phone and call action) */}
+                {(serviceOwner || service.ownerDisplayName || service.ownerPhone) ? (
+                    <View style={[styles.providerRow, { borderColor: colors.border, backgroundColor: colors.card, padding: 10, borderRadius: 8, marginTop: 10 }] }>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Image source={{ uri: serviceOwner?.avatarUrl || service.ownerAvatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png' }} style={styles.ownerAvatar} />
+                            <View style={{ marginLeft: 10, flex: 1 }}>
+                                <Text style={{ fontWeight: '700', color: colors.text }}>{serviceOwner?.displayName || service.ownerDisplayName || 'Proveedor'}</Text>
+                                { (serviceOwner?.phone || service.ownerPhone) ? (
+                                    <Text style={{ color: colors.muted }}>{serviceOwner?.phone || service.ownerPhone}</Text>
+                                ) : null }
+                            </View>
+                            {/* Call action removed: chat will be enabled when provider accepts the reservation (providers manage reservations in "Mis servicios"). */}
+                        </View>
+                    </View>
+                ) : null}
+
                 <Text style={[styles.desc, { color: colors.text }]}>{service.description || 'Descripción no disponible'}</Text>
 
                 <View style={styles.metaRow}>
@@ -198,7 +244,7 @@ export default function ServiceDetail({ route, navigation }: any) {
                 )}
 
                             <View style={{ marginTop: 12 }}>
-                                <TextInput placeholder="Tu nombre" value={name} onChangeText={setName} style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.text }]} placeholderTextColor={colors.muted} />
+                                {/* Input de nombre eliminado: usaremos el displayName del perfil o el email al crear la reserva */}
                                 <TouchableOpacity onPress={() => setShowDatePicker(true)} style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border, justifyContent: 'center' }] }>
                                     <Text style={{ color: date ? colors.text : colors.muted }}>{date || 'Selecciona una fecha'}</Text>
                                 </TouchableOpacity>
@@ -315,6 +361,8 @@ const styles = StyleSheet.create({
     tagsRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 10 },
     tag: { borderWidth: 1, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 16, marginRight: 8, marginBottom: 8 },
     reservationRow: { paddingVertical: 8, borderBottomWidth: 1 },
+    providerRow: { width: '100%' },
+    ownerAvatar: { width: 56, height: 56, borderRadius: 28 },
     title: {
         fontSize: 22,
         fontWeight: '700',
@@ -340,3 +388,4 @@ const styles = StyleSheet.create({
     fieldLabel: { marginTop: 8, fontWeight: '700' },
     sectionTitle: { fontWeight: '700', marginBottom: 8 }
 });
+ 

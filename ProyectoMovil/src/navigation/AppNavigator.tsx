@@ -5,6 +5,7 @@ import { createStackNavigator } from "@react-navigation/stack";
 // @ts-ignore
 const { createBottomTabNavigator } = require('@react-navigation/bottom-tabs');
 import Home from "../screens/Home";
+import ProviderHome from "../screens/ProviderHome";
 import Login from "../screens/Login";
 import Profile from "../screens/Profile";
 import ServiceDetail from "../screens/ServiceDetail";
@@ -79,13 +80,19 @@ function MainTabs() {
                 },
             })}
         >
-            {/* <Tab.Screen name="Chat" component={Chat} /> */}
-            <Tab.Screen name="Explore" component={Home} />
+            <Tab.Screen name="Chat" component={require('../screens/Chat').default} />
+            <Tab.Screen name="Explore" component={isProvider ? ProviderHome : Home} />
         <Tab.Screen name="History" component={History} />
-        {isProvider && (
-        <Tab.Screen name="CreateService" component={AddService} options={{ title: 'Crear servicio' }} />
-        )}
-        <Tab.Screen name="ActiveService" component={require('../screens/ServicioActivo').default} options={{ title: 'Servicio activo' }} />
+                                {/* Show ActiveServices tab only for regular users (not providers) */}
+                                {!isProvider && (
+                                    <Tab.Screen name="ActiveServices" component={require('../screens/ActiveServices').default} options={{ title: 'Servicios' }} />
+                                )}
+                {isProvider && (
+                <Tab.Screen name="CreateService" component={AddService} options={{ title: 'Crear servicio' }} />
+                )}
+                {isProvider && (
+                    <Tab.Screen name="MyServices" component={require('../screens/MyServices').default} options={{ title: 'Mis servicios' }} />
+                )}
         <Tab.Screen name="Profile" component={Profile} />
         </Tab.Navigator>
     );
@@ -99,6 +106,7 @@ export default function AppNavigator({ isLoggedIn }: { isLoggedIn: boolean }) {
                     <Stack.Screen name="Main" component={MainTabs} />
                         <Stack.Screen name="ServiceDetail" component={ServiceDetail} />
                         <Stack.Screen name="AddService" component={AddService} />
+                        <Stack.Screen name="Chat" component={require('../screens/ChatRoom').default} />
                 </>
             ) : (
                 <Stack.Screen name="Login" component={Login} />

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState, useRef } from "react";
 import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 
@@ -23,7 +23,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const [loading, setLoading] = useState<boolean>(true);
 
     useEffect(() => {
+        // avoid redundant updates by tracking previous uid
+        const prevUid = { current: (user as any)?.uid || null } as { current: string | null };
         const unsub = auth().onAuthStateChanged((u: FirebaseAuthTypes.User | null) => {
+            const newUid = u ? u.uid : null;
+            // If uid didn't change, avoid updating state which can trigger re-renders in many listeners
+            if (prevUid.current === newUid) {
+                // still ensure loading is cleared once
+                if (loading) setLoading(false);
+                return;
+            }
+            prevUid.current = newUid;
+
             if (u) {
                 setUser({ uid: u.uid, email: u.email ?? '' });
                 setIsAllowed(true);
@@ -40,8 +51,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         try {
             const userCredential = await auth().signInWithEmailAndPassword(email, password);
             const u = userCredential.user;
-            setUser({ uid: u.uid, email: u.email ?? '' });
-            setIsAllowed(true);
+            // Only update if different
+            if ((user as any)?.uid !== u.uid) setUser({ uid: u.uid, email: u.email ?? '' });
+            if (!isAllowed) setIsAllowed(true);
             // Actualizar/crear perfil en users collection
             try {
                 await firestore().collection('users').doc(u.uid).set({
@@ -70,8 +82,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                     console.warn('updateProfile error', e);
                 }
             }
-            setUser({ uid: u.uid, email: u.email ?? '' });
-            setIsAllowed(true);
+            if ((user as any)?.uid !== u.uid) setUser({ uid: u.uid, email: u.email ?? '' });
+            if (!isAllowed) setIsAllowed(true);
             // Crear documento de usuario básico
             try {
                 // if avatarUrl is not provided, choose a sensible default based on gender

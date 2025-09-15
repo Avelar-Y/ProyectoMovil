@@ -6,14 +6,15 @@ type Props = {
     title: string;
     onPress: () => void;
     variant?: 'primary' | 'secondary' | 'tertiary';
+    disabled?: boolean;
 }
 // componente con props
-export default function CustomButton ({title, onPress, variant='primary'}: Props){
+export default function CustomButton ({title, onPress, variant='primary', disabled=false}: Props){
     const { colors } = useTheme();
     const styles = getStyles(variant, colors);
 
     return( 
-    <TouchableOpacity  style={styles.button} onPress={onPress} >
+    <TouchableOpacity  style={[styles.button, disabled ? { opacity: 0.6 } : null]} onPress={disabled ? undefined : onPress} disabled={disabled} >
         <Text style={styles.text}>{title}</Text>
     </TouchableOpacity>
     );

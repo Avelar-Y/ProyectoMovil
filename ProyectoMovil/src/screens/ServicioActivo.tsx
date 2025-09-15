@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { getUserProfile, getActiveReservationForUser, listenReservation, /*listenMessages,*/ sendMessage, cancelReservation, acceptReservation, loadMessagesPage, listenNewMessages } from '../services/firestoreService';
+import { getUserProfile, getActiveReservationForUser, getActiveReservationForProvider, listenReservation, /*listenMessages,*/ sendMessage, cancelReservation, acceptReservation, loadMessagesPage, listenNewMessages, updateReservation } from '../services/firestoreService';
+import { getServicesForProvider } from '../services/firestoreService';
 import { FlatList, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 
 export default function ServicioActivo({ navigation }: any) {
@@ -11,6 +12,12 @@ export default function ServicioActivo({ navigation }: any) {
     const [profile, setProfile] = useState<any | null>(null);
     const [isProvider, setIsProvider] = useState(false);
         const [reservation, setReservation] = useState<any | null>(null);
+        const [providerServices, setProviderServices] = useState<any[]>([]);
+        const [showModal, setShowModal] = useState(false);
+        const [editing, setEditing] = useState(false);
+        const [editDate, setEditDate] = useState('');
+        const [editNote, setEditNote] = useState('');
+        const [editAddressLine, setEditAddressLine] = useState('');
         const [messages, setMessages] = useState<any[]>([]);
         const [composer, setComposer] = useState('');
         const [loadingMore, setLoadingMore] = useState(false);
@@ -30,8 +37,25 @@ export default function ServicioActivo({ navigation }: any) {
                     }
                     // load active reservation (if any)
                     try {
-                        const active = await getActiveReservationForUser(uid);
-                        if (active && mounted) setReservation(active);
+                        let active = null;
+                        if (p?.role === 'provider') {
+                            active = await getActiveReservationForProvider(uid);
+                            // load provider services
+                            try {
+                                const sv = await getServicesForProvider(uid);
+                                if (mounted) setProviderServices(sv || []);
+                            } catch (e) { console.warn('Could not load provider services', e); }
+                        } else {
+                            active = await getActiveReservationForUser(uid);
+                        }
+                        if (active && mounted) {
+                            if (active.status === 'cancelled') {
+                                // treat cancelled as no active reservation
+                                setReservation(null);
+                            } else {
+                                setReservation(active);
+                            }
+                        }
                     } catch (e) {
                         console.warn('Could not load active reservation', e);
                     }
@@ -74,7 +98,11 @@ export default function ServicioActivo({ navigation }: any) {
         let mounted = true;
         if (!reservation) return;
         // subscribe to reservation changes
-        unsubRes = listenReservation(reservation.id, (data) => setReservation(data));
+        unsubRes = listenReservation(reservation.id, (data) => {
+            if (!data || data.status === 'cancelled') {
+                setReservation(null);
+            } else setReservation(data);
+        });
 
         // initial load of recent messages
         (async () => {
@@ -116,14 +144,49 @@ export default function ServicioActivo({ navigation }: any) {
             <Text style={{ color: colors.muted, marginTop: 8 }}>Aquí verás el chat y el estado de tu servicio activo.</Text>
 
             <View style={{ marginTop: 20, flex: 1 }}>
-                {/* Reservation summary */}
-                {reservation ? (
+                { isProvider ? (
                     <View>
-                        <Text style={{ fontWeight: '700', marginBottom: 6 }}>{reservation.serviceSnapshot?.title || 'Servicio'}</Text>
-                        <Text style={{ color: colors.muted }}>{reservation.address?.addressLine || 'Sin dirección'}</Text>
+                        <Text style={{ fontWeight: '700', marginBottom: 8 }}>Mis servicios</Text>
+                        { providerServices.length === 0 ? (
+                            <Text style={{ color: colors.muted }}>No tienes servicios publicados.</Text>
+                        ) : (
+                            providerServices.map(s => (
+                                <View key={s.id} style={{ padding: 10, backgroundColor: colors.card, borderRadius: 8, marginBottom: 8 }}>
+                                    <Text style={{ fontWeight: '700' }}>{s.title}</Text>
+                                    <Text style={{ color: colors.muted }}>{s.price ? `${s.price}` : 'Sin precio'}</Text>
+                                </View>
+                            ))
+                        )}
+                        <View style={{ marginTop: 12 }}>
+                            <Text style={{ fontWeight: '700', marginBottom: 6 }}>Reserva activa</Text>
+                            {reservation ? (
+                                <TouchableOpacity onPress={() => setShowModal(true)}>
+                                    <View>
+                                        <Text style={{ fontWeight: '700', marginBottom: 6 }}>{reservation.serviceSnapshot?.title || 'Servicio'}</Text>
+                                        <Text style={{ color: colors.muted }}>{reservation.address?.addressLine || 'Sin dirección'}</Text>
+                                        <Text style={{ marginTop: 4, color: colors.primary, fontWeight: '700' }}>{String(reservation.status || 'pending')}</Text>
+                                    </View>
+                                </TouchableOpacity>
+                            ) : (
+                                <Text style={{ color: colors.muted }}>No hay reservas activas como proveedor.</Text>
+                            )}
+                        </View>
                     </View>
                 ) : (
-                    <Text style={{ color: colors.muted }}>No tienes una reserva activa.</Text>
+                    // cliente
+                    <>
+                        {/* Reservation summary */}
+                        {reservation ? (
+                            <TouchableOpacity onPress={() => setShowModal(true)}>
+                                <View>
+                                    <Text style={{ fontWeight: '700', marginBottom: 6 }}>{reservation.serviceSnapshot?.title || 'Servicio'}</Text>
+                                    <Text style={{ color: colors.muted }}>{reservation.address?.addressLine || 'Sin dirección'}</Text>
+                                </View>
+                            </TouchableOpacity>
+                        ) : (
+                            <Text style={{ color: colors.muted }}>No tienes una reserva activa.</Text>
+                        )}
+                    </>
                 )}
 
                 {/* Messages list */}
@@ -171,6 +234,121 @@ export default function ServicioActivo({ navigation }: any) {
                     <Text style={{ color: '#fff', fontWeight: '700' }}>{isProvider ? 'Aceptar' : 'Cancelar'}</Text>
                 </TouchableOpacity>
             </View>
+
+            {/* Modal with reservation details and Chat button when accepted */}
+            <Modal visible={showModal} animationType="slide" transparent={true} onRequestClose={() => setShowModal(false)}>
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.4)' }}>
+                    <View style={{ width: '90%', backgroundColor: colors.card, padding: 16, borderRadius: 12 }}>
+                        <Text style={{ fontWeight: '700', fontSize: 18, marginBottom: 8 }}>{reservation?.serviceSnapshot?.title || 'Detalle de reserva'}</Text>
+                        <Text style={{ color: colors.muted }}>Estado: {reservation?.status || 'pendiente'}</Text>
+
+                        { editing ? (
+                            <View>
+                                <Text style={{ marginTop: 8 }}>Fecha</Text>
+                                <TextInput value={editDate} onChangeText={setEditDate} style={{ borderWidth: 1, borderColor: colors.border, padding: 8, borderRadius: 8, marginTop: 6 }} />
+                                <Text style={{ marginTop: 8 }}>Nota</Text>
+                                <TextInput value={editNote} onChangeText={setEditNote} style={{ borderWidth: 1, borderColor: colors.border, padding: 8, borderRadius: 8, marginTop: 6 }} />
+                                <Text style={{ marginTop: 8 }}>Dirección</Text>
+                                <TextInput value={editAddressLine} onChangeText={setEditAddressLine} style={{ borderWidth: 1, borderColor: colors.border, padding: 8, borderRadius: 8, marginTop: 6 }} />
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 }}>
+                                    <TouchableOpacity onPress={() => setEditing(false)} style={{ padding: 10, borderRadius: 8, backgroundColor: colors.muted }}>
+                                        <Text style={{ color: '#fff' }}>Cancelar</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity onPress={async () => {
+                                        if (!reservation) return;
+                                        try {
+                                            await updateReservation(reservation.id, { date: editDate || undefined, note: editNote || undefined, 'address.addressLine': editAddressLine || undefined });
+                                            // refresh local reservation (use provider/user specific loader)
+                                            const uid = (user as any)?.uid;
+                                            let updated = null;
+                                            const p = await getUserProfile(uid);
+                                            if (p?.role === 'provider') updated = await getActiveReservationForProvider(uid);
+                                            else updated = await getActiveReservationForUser(uid);
+                                            setReservation(updated);
+                                            setEditing(false);
+                                            setShowModal(false);
+                                        } catch (e:any) { Alert.alert('Error', e?.message || 'No se pudo actualizar'); }
+                                    }} style={{ padding: 10, borderRadius: 8, backgroundColor: colors.primary }}>
+                                        <Text style={{ color: '#fff' }}>Guardar</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        ) : (
+                            <>
+                                <Text style={{ marginTop: 8 }}>{reservation?.date}</Text>
+                                <Text style={{ marginTop: 8 }}>{reservation?.address?.addressLine}</Text>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 }}>
+                                    <TouchableOpacity onPress={() => setShowModal(false)} style={{ padding: 10, borderRadius: 8, backgroundColor: colors.muted }}>
+                                        <Text style={{ color: '#fff' }}>Cerrar</Text>
+                                    </TouchableOpacity>
+                                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                                        { !isProvider ? (
+                                            <>
+                                                <TouchableOpacity onPress={() => {
+                                                    // open edit mode prefilled
+                                                    setEditDate(reservation?.date || '');
+                                                    setEditNote(reservation?.note || '');
+                                                    setEditAddressLine(reservation?.address?.addressLine || '');
+                                                    setEditing(true);
+                                                }} style={{ padding: 10, borderRadius: 8, backgroundColor: '#888', marginRight: 8 }}>
+                                                    <Text style={{ color: '#fff' }}>Editar</Text>
+                                                </TouchableOpacity>
+                                                { (reservation?.status === 'in_progress' || reservation?.status === 'confirmed') ? (
+                                                    <TouchableOpacity onPress={() => { setShowModal(false); navigation.navigate('Chat', { reservationId: reservation.id }); }} style={{ padding: 10, borderRadius: 8, backgroundColor: colors.primary }}>
+                                                        <Text style={{ color: '#fff' }}>Chat</Text>
+                                                    </TouchableOpacity>
+                                                ) : null }
+                                            </>
+                                            ) : (
+                                            // Provider actions: Accept / Reject only when pending
+                                            <>
+                                                { reservation?.status === 'pending' ? (
+                                                    <>
+                                                        <TouchableOpacity onPress={async () => {
+                                                            try {
+                                                                await acceptReservation(reservation.id);
+                                                                // refresh
+                                                                const updated = await getActiveReservationForProvider((user as any).uid);
+                                                                setReservation(updated);
+                                                                Alert.alert('Hecho', 'Reserva aceptada');
+                                                                setShowModal(false);
+                                                            } catch(e:any){ Alert.alert('Error', e?.message || 'No se pudo aceptar'); }
+                                                        }} style={{ padding: 10, borderRadius: 8, backgroundColor: colors.primary, marginRight: 8 }}>
+                                                            <Text style={{ color: '#fff' }}>Aceptar</Text>
+                                                        </TouchableOpacity>
+                                                        <TouchableOpacity onPress={async () => {
+                                                            try {
+                                                                await cancelReservation(reservation.id, 'rejected');
+                                                                const updated = await getActiveReservationForProvider((user as any).uid);
+                                                                setReservation(updated);
+                                                                Alert.alert('Hecho', 'Reserva rechazada');
+                                                                setShowModal(false);
+                                                            } catch(e:any){ Alert.alert('Error', e?.message || 'No se pudo rechazar'); }
+                                                        }} style={{ padding: 10, borderRadius: 8, backgroundColor: '#e53935' }}>
+                                                            <Text style={{ color: '#fff' }}>Rechazar</Text>
+                                                        </TouchableOpacity>
+                                                    </>
+                                                ) : (
+                                                    // already accepted or in progress -> show status and chat
+                                                    reservation?.status ? (
+                                                        (reservation?.status === 'in_progress' || reservation?.status === 'confirmed') ? (
+                                                            <TouchableOpacity onPress={() => { setShowModal(false); navigation.navigate('Chat', { reservationId: reservation.id }); }} style={{ padding: 10, borderRadius: 8, backgroundColor: colors.primary }}>
+                                                                <Text style={{ color: '#fff' }}>Chat</Text>
+                                                            </TouchableOpacity>
+                                                        ) : (
+                                                            <Text style={{ color: colors.muted }}>Estado: {reservation?.status}</Text>
+                                                        )
+                                                    ) : null
+                                                )}
+                                            </>
+                                        )}
+                                    </View>
+                                </View>
+                            </>
+                        )}
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 }
