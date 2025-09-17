@@ -1,19 +1,51 @@
-import { createContext, useContext, useEffect, useState, useRef } from "react";
-import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
+import React, { createContext, useContext, useEffect, useState, useRef } from "react";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Keychain from 'react-native-keychain';
+import {
+    getAuth,
+    onAuthStateChanged,
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    signOut,
+    updateProfile,
+    FirebaseAuthTypes,
+} from '@react-native-firebase/auth';
+// removed direct firestore import; user document operations go through ../services/firestoreService
+import { updateUserProfile, getUserProfile } from '../services/firestoreService';
 
 type User = {
     uid: string;
     email: string;
 } | null;
 
+const REMEMBER_KEY = '@auth.remember';
+const ACCOUNTS_KEY = '@auth.accounts';
+const CREDENTIALS_SERVICE = 'com.proyectomovil.credentials';
+
+// helper to detect if native Keychain module is linked/available
+const isKeychainAvailable = () => {
+    try {
+        return typeof (Keychain as any)?.setGenericPassword === 'function' && typeof (Keychain as any)?.getGenericPassword === 'function';
+    } catch (e) {
+        return false;
+    }
+};
+
 const AuthContext = createContext<{
     user: User,
     isAllowed: Boolean,
     loading: boolean,
-    login: (email: string, password: string) => Promise<void>,
-    register: (email: string, password: string, name?: string, phone?: string, avatarUrl?: string, role?: string, gender?: 'male' | 'female' | 'other') => Promise<void>,
+    login: (email: string, password: string, remember?: boolean) => Promise<void>,
+    loginWithSavedAccount?: (email: string) => Promise<void>,
+    register: (email: string, password: string, name?: string, phone?: string, avatarUrl?: string, role?: string, gender?: 'male' | 'female' | 'other', remember?: boolean) => Promise<void>,
     logout: () => void,
+    remember: boolean,
+    setRemember: (v: boolean) => Promise<void>,
+    savedAccounts: Array<{ email: string, uid?: string, displayName?: string, lastUsed?: number }>,
+    saveAccount: (email: string, uid?: string) => Promise<void>,
+    removeSavedAccount: (email: string) => Promise<void>,
+    saveCredentials: (email: string, password: string) => Promise<void>,
+    removeCredentials: (email: string) => Promise<void>,
 } | null>(null);
 
 //medio para exponer la manipulacion de estado a la aplicacion o componentes hijos
@@ -21,21 +53,40 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const [user, setUser] = useState<User>(null);
     const [isAllowed, setIsAllowed] = useState<Boolean>(false);
     const [loading, setLoading] = useState<boolean>(true);
-
     useEffect(() => {
-        // avoid redundant updates by tracking previous uid
-        const prevUid = { current: (user as any)?.uid || null } as { current: string | null };
-        const unsub = auth().onAuthStateChanged((u: FirebaseAuthTypes.User | null) => {
-            const newUid = u ? u.uid : null;
-            // If uid didn't change, avoid updating state which can trigger re-renders in many listeners
-            if (prevUid.current === newUid) {
-                // still ensure loading is cleared once
-                if (loading) setLoading(false);
-                return;
+        // read persisted remember flag into state on mount
+        (async () => {
+            try {
+                const v = await AsyncStorage.getItem(REMEMBER_KEY);
+                setRememberState(v === '1');
+            } catch (e) {
+                console.warn('AuthProvider read remember flag failed', e);
             }
-            prevUid.current = newUid;
+        })();
 
+        const auth = getAuth();
+        const unsub = onAuthStateChanged(auth, async (u: FirebaseAuthTypes.User | null) => {
             if (u) {
+                try {
+                    const v = await AsyncStorage.getItem(REMEMBER_KEY);
+                    const rememberedNow = v === '1';
+                    // if there's no persisted remember flag and this session wasn't marked temporary,
+                    // then we should not keep the user signed (this prevents persisting sessions across restarts)
+                    if (!rememberedNow && !sessionTemporaryRef.current) {
+                        try {
+                            await signOut(auth);
+                        } catch (e) {
+                            console.warn('AuthProvider forced signOut failed', e);
+                        }
+                        setUser(null);
+                        setIsAllowed(false);
+                        setLoading(false);
+                        return;
+                    }
+                } catch (e) {
+                    console.warn('AuthProvider checking remember flag failed', e);
+                }
+
                 setUser({ uid: u.uid, email: u.email ?? '' });
                 setIsAllowed(true);
             } else {
@@ -47,20 +98,42 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         return () => unsub();
     }, []);
 
-    const login = async (email: string, password: string) => {
+    // in-memory ref used to mark a login that should be temporary only for this run
+    const sessionTemporaryRef = useRef(false);
+    const [rememberState, setRememberState] = useState<boolean>(false);
+    const [savedAccounts, setSavedAccounts] = useState<Array<{ email: string, lastUsed?: number }>>([]);
+
+    const login = async (email: string, password: string, remember: boolean = true) => {
         try {
-            const userCredential = await auth().signInWithEmailAndPassword(email, password);
-            const u = userCredential.user;
+            const auth = getAuth();
+            // mark session temporary if user chose not to be remembered
+            if (!remember) {
+                sessionTemporaryRef.current = true;
+                try { await AsyncStorage.removeItem(REMEMBER_KEY); } catch (e) { /* ignore */ }
+            } else {
+                try { await AsyncStorage.setItem(REMEMBER_KEY, '1'); } catch (e) { /* ignore */ }
+            }
+            const userCredential = await signInWithEmailAndPassword(auth, email, password);
+            const u = userCredential.user as FirebaseAuthTypes.User;
             // Only update if different
             if ((user as any)?.uid !== u.uid) setUser({ uid: u.uid, email: u.email ?? '' });
             if (!isAllowed) setIsAllowed(true);
+            // if remember, also add to saved accounts (now that we have uid) and save credentials
+            if (remember) {
+                try { await saveAccount(email, u.uid); } catch (e) { /* ignore */ }
+                // also save credentials securely if Keychain native module is available
+                if (isKeychainAvailable()) {
+                    try { await Keychain.setGenericPassword(email, password, { service: `${CREDENTIALS_SERVICE}:${email}` }); } catch (e) { console.warn('Keychain save failed', e); }
+                } else {
+                    console.warn('Keychain native module not available - skipping secure credential save');
+                }
+            }
             // Actualizar/crear perfil en users collection
             try {
-                await firestore().collection('users').doc(u.uid).set({
+                await updateUserProfile(u.uid, {
                     email: u.email,
-                    displayName: u.displayName || '',
-                    updatedAt: firestore.FieldValue.serverTimestamp(),
-                }, { merge: true });
+                    displayName: (u as any).displayName || '',
+                });
             } catch (e) {
                 console.warn('update user doc error', e);
             }
@@ -70,14 +143,35 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         }
     };
 
-    const register = async (email: string, password: string, name?: string, phone?: string, avatarUrl?: string, role?: string, gender?: 'male' | 'female' | 'other') => {
+    // attempt login using saved secure credentials for an email
+    const loginWithSavedAccount = React.useCallback(async (email: string) => {
         try {
-            const userCredential = await auth().createUserWithEmailAndPassword(email, password);
-            const u = userCredential.user;
+            if (!isKeychainAvailable()) throw new Error('No secure storage available');
+            const creds = await Keychain.getGenericPassword({ service: `${CREDENTIALS_SERVICE}:${email}` });
+            if (!creds) throw new Error('No stored credentials');
+            const storedPassword = creds.password;
+            await login(email, storedPassword, true);
+        } catch (e) {
+            // surface error so callers can fallback to manual login
+            throw e;
+        }
+    }, [login]);
+
+    const register = async (email: string, password: string, name?: string, phone?: string, avatarUrl?: string, role?: string, gender?: 'male' | 'female' | 'other', remember: boolean = true) => {
+        try {
+            const auth = getAuth();
+            if (!remember) {
+                sessionTemporaryRef.current = true;
+                try { await AsyncStorage.removeItem(REMEMBER_KEY); } catch (e) { /* ignore */ }
+            } else {
+                try { await AsyncStorage.setItem(REMEMBER_KEY, '1'); } catch (e) { /* ignore */ }
+            }
+            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+            const u = userCredential.user as FirebaseAuthTypes.User;
             // actualizar displayName en Firebase Auth si se proporcionó
             if (name) {
                 try {
-                    await u.updateProfile({ displayName: name });
+                    await updateProfile(u, { displayName: name });
                 } catch (e) {
                     console.warn('updateProfile error', e);
                 }
@@ -92,15 +186,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                 const defaultOther = 'https://cdn-icons-png.flaticon.com/512/4128/4128176.png';
                 const chosenAvatar = avatarUrl && avatarUrl.length > 0 ? avatarUrl : (gender === 'female' ? defaultFemale : gender === 'male' ? defaultMale : defaultOther);
 
-                await firestore().collection('users').doc(u.uid).set({
+                await updateUserProfile(u.uid, {
                     email: u.email,
-                    displayName: name || u.displayName || '',
-                    name: name || u.displayName || '',
+                    displayName: name || (u as any).displayName || '',
+                    name: name || (u as any).displayName || '',
                     phone: phone || '',
                     avatarUrl: chosenAvatar,
                     role: role || 'user',
-                    createdAt: firestore.FieldValue.serverTimestamp(),
-                }, { merge: true });
+                });
+                // save account now that user doc exists
+                if (remember) {
+                    try { await saveAccount(email, u.uid); } catch (e) { /* ignore */ }
+                }
             } catch (e) {
                 console.warn('create user doc error', e);
             }
@@ -110,13 +207,148 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         }
     };
 
-    const logout = async () => {
-        await auth().signOut();
-        setUser(null);
-        setIsAllowed(false);
-    };
+    const refreshSavedAccountsDisplayNames = React.useCallback(async () => {
+        try {
+            const raw = await AsyncStorage.getItem(ACCOUNTS_KEY);
+            if (!raw) return;
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) return;
+            let changed = false;
+            const updated: any[] = [];
+            for (const e of parsed) {
+                if (!e || !e.email) continue;
+                const entry: any = { email: e.email, uid: e.uid, displayName: e.displayName, lastUsed: e.lastUsed };
+                if (entry.uid) {
+                    try {
+                        const profile = await getUserProfile(entry.uid);
+                        if (profile && profile.displayName && profile.displayName !== entry.displayName) {
+                            entry.displayName = profile.displayName;
+                            changed = true;
+                        }
+                    } catch (err) {
+                        // ignore per-account errors
+                    }
+                }
+                updated.push(entry);
+            }
+            if (changed) {
+                await AsyncStorage.setItem(ACCOUNTS_KEY, JSON.stringify(updated));
+                setSavedAccounts(updated);
+            }
+        } catch (err) {
+            console.warn('refreshSavedAccountsDisplayNames failed', err);
+        }
+    }, []);
+
+    const logout = React.useCallback(async () => {
+        const auth = getAuth();
+        try {
+            // Attempt to refresh saved accounts so displayName changes are reflected before we sign out
+            try { await refreshSavedAccountsDisplayNames(); } catch (e) { /* ignore */ }
+            await signOut(auth);
+        } catch (e) {
+            // don't throw — callers may not handle this and it can crash the UI
+            console.warn('AuthContext logout error', e);
+        } finally {
+            // ensure local state is cleared even if signOut failed locally
+            setUser(null);
+            setIsAllowed(false);
+            // clear persisted remember flag on explicit logout
+            try { await AsyncStorage.removeItem(REMEMBER_KEY); } catch (e) { /* ignore */ }
+        }
+    }, [refreshSavedAccountsDisplayNames]);
+
+    const loadSavedAccounts = React.useCallback(async () => {
+        try {
+            const raw = await AsyncStorage.getItem(ACCOUNTS_KEY);
+            if (!raw) return setSavedAccounts([]);
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) return setSavedAccounts([]);
+            // normalize entries: older entries may be just { email }
+            const normalized: Array<{ email: string, uid?: string, displayName?: string, lastUsed?: number }> = [];
+            for (const e of parsed) {
+                if (!e || !e.email) continue;
+                const entry: any = { email: e.email, lastUsed: e.lastUsed };
+                if (e.uid) entry.uid = e.uid;
+                if (e.displayName) entry.displayName = e.displayName;
+                // if we have uid but no displayName, try to fetch it
+                if (entry.uid && !entry.displayName) {
+                    try {
+                        const profile = await getUserProfile(entry.uid);
+                        if (profile && profile.displayName) entry.displayName = profile.displayName;
+                    } catch (err) {
+                        // ignore
+                    }
+                }
+                normalized.push(entry);
+            }
+            setSavedAccounts(normalized);
+        } catch (e) {
+            console.warn('loadSavedAccounts failed', e);
+        }
+    }, []);
+
+    const saveAccount = React.useCallback(async (email: string, uid?: string) => {
+        try {
+            const now = Date.now();
+            let displayName: string | undefined = undefined;
+            if (uid) {
+                try {
+                    const profile = await getUserProfile(uid);
+                    if (profile && profile.displayName) displayName = profile.displayName;
+                } catch (err) {
+                    // ignore profile fetch errors
+                }
+            }
+            const next = [{ email, uid, displayName, lastUsed: now }, ...savedAccounts.filter(s => s.email !== email)];
+            await AsyncStorage.setItem(ACCOUNTS_KEY, JSON.stringify(next));
+            setSavedAccounts(next);
+        } catch (e) { console.warn('saveAccount failed', e); }
+    }, [savedAccounts]);
+
+    const removeSavedAccount = React.useCallback(async (email: string) => {
+        try {
+            const next = savedAccounts.filter(s => s.email !== email);
+            await AsyncStorage.setItem(ACCOUNTS_KEY, JSON.stringify(next));
+            setSavedAccounts(next);
+            // also remove stored credentials if present and available
+            if (isKeychainAvailable()) {
+                try { await Keychain.resetGenericPassword({ service: `${CREDENTIALS_SERVICE}:${email}` }); } catch (e) { /* ignore */ }
+            }
+        } catch (e) { console.warn('removeSavedAccount failed', e); }
+    }, [savedAccounts]);
+
+    // load saved accounts on mount
+    React.useEffect(() => { loadSavedAccounts(); }, [loadSavedAccounts]);
+
+    const setRemember = React.useCallback(async (v: boolean) => {
+        try {
+            if (v) await AsyncStorage.setItem(REMEMBER_KEY, '1');
+            else await AsyncStorage.removeItem(REMEMBER_KEY);
+            setRememberState(v);
+        } catch (e) { console.warn('setRemember failed', e); }
+    }, []);
+
+    const saveCredentials = React.useCallback(async (email: string, password: string) => {
+        try {
+            if (!isKeychainAvailable()) {
+                console.warn('Keychain native module not available - cannot save credentials');
+                return;
+            }
+            await Keychain.setGenericPassword(email, password, { service: `${CREDENTIALS_SERVICE}:${email}` });
+        } catch (e) { console.warn('saveCredentials failed', e); }
+    }, []);
+
+    const removeCredentials = React.useCallback(async (email: string) => {
+        try {
+            if (!isKeychainAvailable()) return;
+            await Keychain.resetGenericPassword({ service: `${CREDENTIALS_SERVICE}:${email}` });
+        } catch (e) { /* ignore */ }
+    }, []);
+
+    const value = React.useMemo(() => ({ user, isAllowed, loading, login, register, logout, remember: rememberState, setRemember, savedAccounts, saveAccount, removeSavedAccount, loginWithSavedAccount, saveCredentials, removeCredentials, refreshSavedAccountsDisplayNames }), [user, isAllowed, loading, logout, rememberState, setRemember, savedAccounts, saveAccount, removeSavedAccount, loginWithSavedAccount, saveCredentials, removeCredentials, refreshSavedAccountsDisplayNames]);
     return (
-        <AuthContext.Provider value={{ user, isAllowed, loading, login, register, logout }}>
+        <AuthContext.Provider value={value}>
             {children}
         </AuthContext.Provider>
     )

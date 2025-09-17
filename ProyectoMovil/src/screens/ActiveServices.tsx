@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, RefreshControl, Image, ActivityIndicator } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { getActiveReservationForUser, cancelReservation } from '../services/firestoreService';
-import firestore from '@react-native-firebase/firestore';
+import { useRefresh } from '../contexts/RefreshContext';
+// removed direct firestore import; use service helpers
+import { useFocusEffect } from '@react-navigation/native';
 
 export default function ActiveServices({ navigation }: any) {
   const { user } = useAuth();
@@ -32,25 +34,22 @@ export default function ActiveServices({ navigation }: any) {
     }
   };
 
-  useEffect(() => {
-    load();
-    const uid = (user as any)?.uid;
-    if (!uid) return;
-    // listen for changes to reservations for this user
-    const unsub = firestore().collection('reservations').where('userId', '==', uid).onSnapshot((snap) => {
-      // If any relevant doc changes, reload active reservation. Also ignore cancelled docs.
-      const hasNonCancelled = snap.docs.some(d => {
-        const data = d.data() as any;
-        return data.status && data.status !== 'cancelled';
-      });
-      if (hasNonCancelled) load();
-      else {
-        // If all docs are cancelled/removed, clear active
-        setActiveReservation(null);
-      }
-    }, (e) => console.warn('ActiveServices listener', e));
-    return () => unsub();
-  }, [user]);
+  // load on focus instead of realtime listener to reduce Firestore usage
+  useFocusEffect(
+    useCallback(() => {
+      load();
+      return () => {};
+    }, [user])
+  );
+
+  // register global refresh
+  const refreshCtx = useRefresh();
+  const refreshHandler = useCallback(async () => { await load(); }, [user]);
+  React.useEffect(() => {
+    const id = 'ActiveServices';
+    refreshCtx.register(id, refreshHandler);
+    return () => refreshCtx.unregister(id);
+  }, [refreshHandler]);
 
   const handleCancel = async () => {
     if (!activeReservation?.id) return;

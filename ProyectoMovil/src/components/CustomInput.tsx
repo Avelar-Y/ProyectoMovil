@@ -10,12 +10,14 @@ type Props = {
     onChange: (text: string) => void;
     icon?: string;
     required?: boolean;
+    forceShowError?: boolean;
 }
 
 export default function CustomInput({ value, title, type = "text", onChange, required }: Props) {
     const [isSecureText, setIsSecureText] = useState(type === 'password');
     const [isPasswordVisible, setIsPasswordVisible] = useState (false);
     const { colors } = useTheme();
+    const [touched, setTouched] = useState(false);
 
     const isPasswordField = type==="password";
     const keyboardType: KeyboardTypeOptions = 
@@ -37,9 +39,10 @@ export default function CustomInput({ value, title, type = "text", onChange, req
             return i18n.t('passwordMustBeStronger');
     }
     const error = getError();
+    const showError = Boolean(error) && (touched || (/* @ts-ignore */ (arguments[0] && arguments[0].forceShowError)));
     return (
         <View style={{ marginVertical: 6 }}>
-            <View style={[styles.inputContainer, { backgroundColor: colors.inputBg, borderColor: colors.border }, error && styles.inputError]}>
+            <View style={[styles.inputContainer, { backgroundColor: colors.inputBg, borderColor: colors.border }, showError && styles.inputError]}>
                 {/* left icon: show a context icon based on type if available */}
                 <View style={styles.leftIcon}>
                     {(() => {
@@ -62,6 +65,7 @@ export default function CustomInput({ value, title, type = "text", onChange, req
                     keyboardType={keyboardType}
                     placeholderTextColor={colors.muted}
                     underlineColorAndroid="transparent"
+                    onBlur={() => setTouched(true)}
                 />
 
                 {isPasswordField && (
@@ -75,7 +79,7 @@ export default function CustomInput({ value, title, type = "text", onChange, req
                     </TouchableOpacity>
                 )}
             </View>
-            {error ? <Text style={styles.error}>{error}</Text> : null}
+            {showError ? <Text style={styles.error}>{error}</Text> : null}
         </View>
     );
 };

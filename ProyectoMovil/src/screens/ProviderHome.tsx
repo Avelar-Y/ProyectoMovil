@@ -3,58 +3,90 @@ import { View, Text, StyleSheet, ActivityIndicator, FlatList, TouchableOpacity, 
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { getServicesForProvider, getPendingReservationsForProvider } from '../services/firestoreService';
+import { useRefresh } from '../contexts/RefreshContext';
 
 export default function ProviderHome({ navigation }: any) {
   const { user } = useAuth();
   const { colors } = useTheme();
   const [services, setServices] = useState<any[]>([]);
   const [pending, setPending] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const refreshCtx = useRefresh();
 
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const uid = (user as any)?.uid;
-        if (!uid) return;
-        const sv = await getServicesForProvider(uid);
-        const pd = await getPendingReservationsForProvider(uid);
-        if (!mounted) return;
-        setServices(sv || []);
-        setPending(pd || []);
-      } catch (e) {
-        console.warn('ProviderHome load error', e);
-      } finally {
-        if (mounted) setLoading(false);
+  const loadAll = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const uid = (user as any)?.uid;
+      if (!uid) {
+        setServices([]);
+        setPending([]);
+        return;
       }
-    })();
-    return () => { mounted = false };
+      const sv = await getServicesForProvider(uid);
+      const pd = await getPendingReservationsForProvider(uid);
+      setServices(sv || []);
+      setPending(pd || []);
+    } catch (e) {
+      console.warn('ProviderHome load error', e);
+    } finally {
+      setLoading(false);
+    }
   }, [user]);
 
+  // Provide a stable handler that can be registered on-demand by tests or controlled components.
+  const loadAllHandler = React.useCallback(async () => {
+    try {
+      await loadAll();
+    } catch (e) {
+      console.warn('ProviderHome global refresh error', e);
+    }
+  }, [loadAll]);
+
+  // NOTE: intentionally avoid automatic registration on mount to prevent re-registration loops.
+  // If you want this screen to participate in the global refresh, call refreshCtx.register('ProviderHome', loadAllHandler)
+  // from a user action (e.g. a toggle/button) or from a higher-level coordinator that ensures stable identity.
+
   if (loading) return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}> 
       <ActivityIndicator />
     </View>
   );
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}> 
       <Text style={[styles.title, { color: colors.text }]}>Panel de proveedor</Text>
+      <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+        <TouchableOpacity onPress={loadAll} style={[styles.cta, { backgroundColor: colors.primary, marginRight: 8 }]}> 
+          <Text style={{ color: '#fff', fontWeight: '700' }}>Cargar ahora</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => refreshCtx.register('ProviderHome', loadAllHandler)} style={[styles.cta, { backgroundColor: colors.surface }]}> 
+          <Text style={{ color: colors.text, fontWeight: '700' }}>Registrar refresh</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => refreshCtx.unregister('ProviderHome')} style={[styles.cta, { backgroundColor: colors.surface, marginLeft: 8 }]}> 
+          <Text style={{ color: colors.text, fontWeight: '700' }}>Anular registro</Text>
+        </TouchableOpacity>
+      </View>
 
       <View style={{ marginTop: 12 }}>
         <Text style={{ color: colors.muted, marginBottom: 8 }}>Servicios publicados</Text>
         {services.length === 0 ? (
           <Text style={{ color: colors.muted }}>No tienes servicios publicados.</Text>
         ) : (
-          <FlatList data={services} keyExtractor={i => i.id} renderItem={({ item }) => (
-            <TouchableOpacity onPress={() => navigation.navigate('AddService', { service: item })} style={[styles.row, { backgroundColor: colors.card }]}> 
-              <Image source={{ uri: item.icon || 'https://cdn-icons-png.flaticon.com/512/854/854878.png' }} style={{ width: 48, height: 48, borderRadius: 8, marginRight: 12 }} />
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.text, fontWeight: '700' }}>{item.title}</Text>
-                <Text style={{ color: colors.muted }}>{item.price ? String(item.price) : 'Sin precio'}</Text>
-              </View>
-            </TouchableOpacity>
-          )} />
+          <FlatList
+            data={services}
+            keyExtractor={i => i.id}
+            renderItem={({ item }) => (
+              <TouchableOpacity onPress={() => navigation.navigate('AddService', { service: item })} style={[styles.row, { backgroundColor: colors.card }]}> 
+                <Image source={{ uri: item.icon || 'https://cdn-icons-png.flaticon.com/512/854/854878.png' }} style={{ width: 48, height: 48, borderRadius: 8, marginRight: 12 }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: colors.text, fontWeight: '700' }}>{item.title}</Text>
+                  <Text style={{ color: colors.muted }}>{item.price ? String(item.price) : 'Sin precio'}</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+            refreshing={refreshCtx.refreshing || loading}
+            onRefresh={async () => await refreshCtx.triggerRefresh()}
+          />
         )}
       </View>
 
@@ -63,19 +95,25 @@ export default function ProviderHome({ navigation }: any) {
         {pending.length === 0 ? (
           <Text style={{ color: colors.muted }}>No hay solicitudes pendientes.</Text>
         ) : (
-          <FlatList data={pending} keyExtractor={i => i.id} renderItem={({ item }) => (
-            <TouchableOpacity onPress={() => navigation.navigate('MyServices')} style={[styles.row, { backgroundColor: colors.card }]}> 
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.text, fontWeight: '700' }}>{item.serviceSnapshot?.title || 'Servicio'}</Text>
-                <Text style={{ color: colors.muted }}>{item.name} · {item.date}</Text>
-              </View>
-            </TouchableOpacity>
-          )} />
+          <FlatList
+            data={pending}
+            keyExtractor={i => i.id}
+            renderItem={({ item }) => (
+              <TouchableOpacity onPress={() => navigation.navigate('MyServices')} style={[styles.row, { backgroundColor: colors.card }]}> 
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: colors.text, fontWeight: '700' }}>{item.serviceSnapshot?.title || 'Servicio'}</Text>
+                  <Text style={{ color: colors.muted }}>{item.name} · {item.date}</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+            refreshing={refreshCtx.refreshing || loading}
+            onRefresh={async () => await refreshCtx.triggerRefresh()}
+          />
         )}
       </View>
 
       <View style={{ marginTop: 20 }}>
-        <TouchableOpacity onPress={() => navigation.navigate('MyServices')} style={[styles.cta, { backgroundColor: colors.primary }]}>
+        <TouchableOpacity onPress={() => navigation.navigate('MyServices')} style={[styles.cta, { backgroundColor: colors.primary }]}> 
           <Text style={{ color: '#fff', fontWeight: '700' }}>Ir a Mis servicios</Text>
         </TouchableOpacity>
       </View>

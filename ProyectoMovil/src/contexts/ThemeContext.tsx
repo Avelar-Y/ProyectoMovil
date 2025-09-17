@@ -51,12 +51,14 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
     AsyncStorage.setItem('theme', themeName).catch(() => null);
   }, [themeName]);
 
-  const toggle = () => setThemeName(t => (t === 'light' ? 'dark' : 'light'));
+  const toggle = React.useCallback(() => setThemeName(t => (t === 'light' ? 'dark' : 'light')), []);
 
-  const colors = themeName === 'light' ? LIGHT : DARK;
+  const colors = React.useMemo(() => (themeName === 'light' ? LIGHT : DARK), [themeName]);
+
+  const value = React.useMemo(() => ({ themeName, colors, toggle }), [themeName, colors, toggle]);
 
   return (
-    <ThemeContext.Provider value={{ themeName, colors, toggle }}>
+    <ThemeContext.Provider value={value}>
       {children}
     </ThemeContext.Provider>
   );

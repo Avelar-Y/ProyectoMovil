@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Image, Switch, Alert, TextInput, ActivityIndicator, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, Image, Switch, Alert, TextInput, ActivityIndicator, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, RefreshControl } from 'react-native';
 import { saveReservation, getUserProfile, updateUserProfile, getReservationsForUser } from '../services/firestoreService';
 import CustomButton from '../components/CustomButton';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { useRefresh } from '../contexts/RefreshContext';
 
 export default function Profile({ navigation }: any) {
     const { user, logout } = useAuth();
@@ -58,6 +59,28 @@ export default function Profile({ navigation }: any) {
         load();
         return () => { mounted = false; };
     }, [user]);
+
+    // register load with global refresh
+    const refreshCtx = useRefresh();
+    const profileRefreshHandler = React.useCallback(async () => {
+        try {
+            if (!user?.uid) return;
+            const profile = await getUserProfile(user.uid);
+            setName(profile?.name || '');
+            setPhone(profile?.phone || '');
+            setAvatarUrl(profile?.avatarUrl || '');
+            setRole(profile?.role === 'provider' ? 'provider' : 'user');
+            if (profile?.addresses && Array.isArray(profile.addresses)) setAddresses(profile.addresses || []);
+            else if (profile?.address) setAddresses([profile.address]);
+            const res = await getReservationsForUser(user.email || user.uid);
+            setReservations(res || []);
+        } catch (e) { console.warn('Profile refresh failed', e); }
+    }, [user]);
+    React.useEffect(() => {
+        const id = 'Profile';
+        refreshCtx.register(id, profileRefreshHandler);
+        return () => refreshCtx.unregister(id);
+    }, [profileRefreshHandler]);
 
     const handleSaveProfile = async () => {
         if (!user?.uid) return Alert.alert('Error', 'Usuario no encontrado');
@@ -119,7 +142,9 @@ export default function Profile({ navigation }: any) {
 
     return (
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-            <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+                <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled"
+                    refreshControl={<RefreshControl refreshing={refreshCtx.refreshing || loading} onRefresh={async () => await refreshCtx.triggerRefresh()} />}
+                >
                 <Image
                     source={{ uri: avatarUrl || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }}
                     style={styles.avatar}
@@ -157,7 +182,7 @@ export default function Profile({ navigation }: any) {
                                 </View>
                             )}
                             <CustomButton title="Historial" onPress={() => navigation.navigate('History')} />
-                            <CustomButton title="Cerrar sesión" onPress={async () => { await logout(); }} variant="secondary" />
+                            <CustomButton title="Cerrar sesión" onPress={async () => { try { await logout(); } catch (e) { Alert.alert('Error', 'No se pudo cerrar sesión'); console.warn('logout failed', e); } }} variant="secondary" />
                         </View>
 
                         <View style={{ marginTop: 18 }}>

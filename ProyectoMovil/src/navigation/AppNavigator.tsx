@@ -5,7 +5,7 @@ import { createStackNavigator } from "@react-navigation/stack";
 // @ts-ignore
 const { createBottomTabNavigator } = require('@react-navigation/bottom-tabs');
 import Home from "../screens/Home";
-import ProviderHome from "../screens/ProviderHome";
+import ProviderHomeMinimal from "../screens/ProviderHomeMinimal";
 import Login from "../screens/Login";
 import Profile from "../screens/Profile";
 import ServiceDetail from "../screens/ServiceDetail";
@@ -15,8 +15,7 @@ import { useEffect, useState } from 'react';
 import { getUserProfile } from '../services/firestoreService';
 import History from "../screens/History";
 // import Chat from "../screens/Chat";
-import { View, Text, Platform } from 'react-native';
-import { Image } from 'react-native';
+import { View, Text, Platform, ActivityIndicator, Image } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import type { RouteProp } from '@react-navigation/native';
 
@@ -26,7 +25,7 @@ const Tab = createBottomTabNavigator();
 function MainTabs() {
     const { colors } = useTheme();
     const { user } = useAuth();
-    const [isProvider, setIsProvider] = useState(false);
+    const [isProvider, setIsProvider] = useState<boolean | null>(null);
 
     useEffect(() => {
         let mounted = true;
@@ -45,6 +44,18 @@ function MainTabs() {
         })();
         return () => { mounted = false };
     }, [user]);
+    // Ensure Hooks are called in the same order on every render.
+    const ExploreComp = React.useMemo(() => (isProvider ? ProviderHomeMinimal : Home), [isProvider]);
+
+    if (isProvider === null) {
+        // still determining role: show a lightweight loader to avoid remounts of the tabs
+        return (
+            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}>
+                <ActivityIndicator size="large" color={colors.primary} />
+            </View>
+        );
+    }
+
     return (
         <Tab.Navigator
             screenOptions={({ route }: { route: RouteProp<Record<string, object | undefined>, string> }) => ({
@@ -81,7 +92,7 @@ function MainTabs() {
             })}
         >
             <Tab.Screen name="Chat" component={require('../screens/Chat').default} />
-            <Tab.Screen name="Explore" component={isProvider ? ProviderHome : Home} />
+            <Tab.Screen name="Explore" component={ExploreComp} />
         <Tab.Screen name="History" component={History} />
                                 {/* Show ActiveServices tab only for regular users (not providers) */}
                                 {!isProvider && (

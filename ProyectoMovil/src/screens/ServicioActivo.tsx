@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { getUserProfile, getActiveReservationForUser, getActiveReservationForProvider, listenReservation, /*listenMessages,*/ sendMessage, cancelReservation, acceptReservation, loadMessagesPage, listenNewMessages, updateReservation } from '../services/firestoreService';
 import { getServicesForProvider } from '../services/firestoreService';
 import { FlatList, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { useRefresh } from '../contexts/RefreshContext';
 
 export default function ServicioActivo({ navigation }: any) {
     const { colors } = useTheme();
@@ -66,6 +67,31 @@ export default function ServicioActivo({ navigation }: any) {
         })();
         return () => { mounted = false };
     }, [user]);
+
+    // register global refresh with a stable handler
+    const refreshCtx = useRefresh();
+    const refreshHandler = React.useCallback(async () => {
+        try {
+            const uid = (user as any)?.uid;
+            if (!uid) return;
+            const p = await getUserProfile(uid);
+            setProfile(p || null);
+            setIsProvider(p?.role === 'provider');
+            let active = null;
+            if (p?.role === 'provider') {
+                active = await getActiveReservationForProvider(uid);
+                const sv = await getServicesForProvider(uid);
+                setProviderServices(sv || []);
+            } else active = await getActiveReservationForUser(uid);
+            if (active && active.status === 'cancelled') setReservation(null);
+            else setReservation(active);
+        } catch (e) { console.warn('ServicioActivo refresh failed', e); }
+    }, [user]);
+    React.useEffect(() => {
+        const id = 'ServicioActivo';
+        refreshCtx.register(id, refreshHandler);
+        return () => refreshCtx.unregister(id);
+    }, [refreshHandler]);
 
     const handleAction = () => {
         if (!reservation) {

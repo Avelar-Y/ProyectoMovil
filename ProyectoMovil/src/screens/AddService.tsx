@@ -4,6 +4,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { saveService, getUserProfile } from '../services/firestoreService';
 import { useAuth } from '../contexts/AuthContext';
 import CustomButton from '../components/CustomButton';
+import { useRefresh } from '../contexts/RefreshContext';
 
 const AddService: React.FC = () => {
   const { user } = useAuth();
@@ -32,6 +33,21 @@ const AddService: React.FC = () => {
     })();
     return () => { mounted = false; };
   }, [user]);
+
+  const refreshCtx = useRefresh();
+  const addServiceHandler = React.useCallback(async () => {
+    try {
+      const uid = (user as any)?.uid;
+      if (!uid) return;
+      const p = await getUserProfile(uid);
+      setIsProvider(p?.role === 'provider');
+    } catch (e) { console.warn('AddService refresh failed', e); }
+  }, [user]);
+  React.useEffect(() => {
+    const id = 'AddService';
+    refreshCtx.register(id, addServiceHandler);
+    return () => refreshCtx.unregister(id);
+  }, [addServiceHandler]);
 
   const resetForm = () => {
     setTitle('');

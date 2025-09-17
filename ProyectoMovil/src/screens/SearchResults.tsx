@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
-import firestore from '@react-native-firebase/firestore';
+// removed direct firestore import; using service helper getServices
+import { getServices } from '../services/firestoreService';
 import { useTheme } from '../contexts/ThemeContext';
 
 export default function SearchResults({ route, navigation }: any) {
@@ -16,29 +17,21 @@ export default function SearchResults({ route, navigation }: any) {
       return;
     }
 
-    const q = firestore()
-      .collection('services')
-      .where('active', '==', true)
-      .orderBy('createdAt', 'desc');
-
-    const unsubscribe = q.onSnapshot(snapshot => {
-      const items: any[] = [];
-      snapshot.forEach(doc => {
-        const data: any = doc.data();
-        const title = (data.title || data.key || '').toLowerCase();
-        const desc = (data.description || data.desc || '').toLowerCase();
-        if (title.includes(query.toLowerCase()) || desc.includes(query.toLowerCase())) {
-          items.push({ id: doc.id, ...data });
-        }
-      });
-      setResults(items);
-      setLoading(false);
-    }, err => {
-      console.warn('search onSnapshot error', err);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
+    (async () => {
+      try {
+        const services = await getServices();
+        const items = services.filter((data: any) => {
+          const title = (data.title || data.key || '').toLowerCase();
+          const desc = (data.description || data.desc || '').toLowerCase();
+          return title.includes(query.toLowerCase()) || desc.includes(query.toLowerCase());
+        });
+        setResults(items as any[]);
+      } catch (err) {
+        console.warn('search fetch error', err);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [query]);
 
   if (loading) {

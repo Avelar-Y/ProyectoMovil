@@ -1,3 +1,4 @@
+import React from 'react';
 import { I18n } from "i18n-js";
 import { createContext, useContext, useEffect, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -37,8 +38,16 @@ export const LanguageProvider = ({children}: {children: React.ReactNode})=> {
         await AsyncStorage.setItem("language", lang);
     }; 
 
+    const changeLanguageCb = React.useCallback(async (lang: Language) => {
+        setLanguage(lang);
+        i18n.locale = lang;
+        await AsyncStorage.setItem("language", lang);
+    }, []);
+
+    const value = React.useMemo(() => ({ language, changeLanguage: changeLanguageCb }), [language, changeLanguageCb]);
+
     return (
-        <LanguageContext.Provider value={{language, changeLanguage}}>
+        <LanguageContext.Provider value={value}>
             {children}
         </LanguageContext.Provider>
     )

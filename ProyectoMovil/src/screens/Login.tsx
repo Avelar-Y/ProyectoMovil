@@ -1,5 +1,5 @@
 import React, { useState, useRef } from "react";
-import { Alert, StyleSheet, View, Animated, Text, Pressable, ActivityIndicator, ScrollView, Dimensions } from "react-native";
+import { Alert, StyleSheet, View, Animated, Text, Pressable, ActivityIndicator, ScrollView, Dimensions, Switch, Modal, FlatList, TouchableOpacity } from "react-native";
 import CustomButton from "../components/CustomButton";
 import CustomInput from "../components/CustomInput";
 import { useAuth } from "../contexts/AuthContext";
@@ -11,30 +11,35 @@ export default function Login({ navigation }: any) {
     const [password, setPassword] = useState('');
     const [name, setName] = useState('');
     const [phone, setPhone] = useState('');
-    const [avatarUrl, setAvatarUrl] = useState('');
     const [role, setRole] = useState<'user' | 'provider'>('user');
-    const [gender, setGender] = useState<'male' | 'female' | 'other'>('male');
+    const [gender, setGender] = useState<'male' | 'female'>('male');
     const [confirmPassword, setConfirmPassword] = useState('');
-    const { login, register } = useAuth();
+    const { login, register, loginWithSavedAccount, remember: rememberContext, setRemember, savedAccounts, removeSavedAccount, saveCredentials } = useAuth();
+    const [remember, setRememberLocal] = useState<boolean>(rememberContext ?? true);
     const [submitting, setSubmitting] = useState(false);
+    const [showErrors, setShowErrors] = useState(false);
+    const [showAccountsModal, setShowAccountsModal] = useState(false);
 
     const [mode, setMode] = useState<'chooser' | 'login' | 'register'>('chooser');
 
     const anim = useRef(new Animated.Value(0)).current; // chooser -> form
-    const inputAnims = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
+    const inputAnims = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
 
     const resetInputAnims = () => inputAnims.forEach(a => a.setValue(0));
 
     const handleLogin = async () => {
+        setShowErrors(true);
         if (!email || !password) {
             Alert.alert('Error', 'Por favor complete todos los campos');
             return;
         }
         try {
             setSubmitting(true);
-            await login(email, password);
-                // Navegar al stack principal y seleccionar la pestaña 'Explore' (que contiene Home)
-                navigation.navigate('Main', { screen: 'Explore', params: { correo: email } });
+            await login(email, password, remember);
+            try { await setRemember(remember); } catch (_) {}
+            // Nota: no navegamos manualmente a 'Main' porque el AppNavigator cambia cuando AuthProvider
+            // actualiza el estado `user`. Dejar que la reactividad de auth maneje la navegación evita
+            // intentar navegar a una pantalla que no existe en el stack actual y elimina la advertencia.
         } catch (error: any) {
             console.log(error);
         } finally {
@@ -43,6 +48,7 @@ export default function Login({ navigation }: any) {
     };
 
     const handleRegister = async () => {
+        setShowErrors(true);
         if (!name || !email || !password || !confirmPassword) {
             Alert.alert('Error', 'Por favor complete todos los campos');
             return;
@@ -53,9 +59,10 @@ export default function Login({ navigation }: any) {
         }
         try {
             setSubmitting(true);
-            await register(email, password, name, phone, avatarUrl, role, gender);
-                // Después de registrar, navegar al flujo principal
-                navigation.navigate('Main', { screen: 'Explore', params: { correo: email } });
+            await register(email, password, name, phone, /* avatarUrl removed */ undefined, role, gender, remember);
+            try { await setRemember(remember); } catch (_) {}
+            // No navegamos manualmente por la misma razón que en login: el cambio de estado auth
+            // causará que `AppNavigator` renderice las pantallas del usuario autenticado.
         } catch (error: any) {
             Alert.alert('Error', error.message);
         } finally {
@@ -111,20 +118,25 @@ export default function Login({ navigation }: any) {
                 </Pressable>
 
                 {mode === 'register' && (
-                    <Animated.View style={{ opacity: inputAnims[0], transform: [{ translateY: inputAnims[0].interpolate({ inputRange: [0,1], outputRange: [8,0] }) }] }}>
-                        <CustomInput type="text" value={name} title="Nombre" onChange={setName} required />
-                    </Animated.View>
+                    <>
+                        <Animated.View style={{ opacity: inputAnims[0], transform: [{ translateY: inputAnims[0].interpolate({ inputRange: [0,1], outputRange: [8,0] }) }] }}>
+                            <CustomInput type="text" value={name} title="Nombre" onChange={setName} required forceShowError={showErrors} />
+                        </Animated.View>
+                        <Animated.View style={{ opacity: inputAnims[1], transform: [{ translateY: inputAnims[1].interpolate({ inputRange: [0,1], outputRange: [8,0] }) }] }}>
+                            <CustomInput type="text" value={phone} title="Teléfono (opcional)" onChange={setPhone} />
+                        </Animated.View>
+                        <Animated.View style={{ opacity: inputAnims[2], transform: [{ translateY: inputAnims[2].interpolate({ inputRange: [0,1], outputRange: [8,0] }) }] }}>
+                            <CustomInput type="email" value={email} title="Correo" onChange={setEmail} required forceShowError={showErrors} />
+                        </Animated.View>
+                        <Animated.View style={{ opacity: inputAnims[3], transform: [{ translateY: inputAnims[3].interpolate({ inputRange: [0,1], outputRange: [8,0] }) }] }}>
+                            <CustomInput type="password" value={password} title="Contraseña" onChange={setPassword} required forceShowError={showErrors} />
+                        </Animated.View>
+                        <Animated.View style={{ opacity: inputAnims[4], transform: [{ translateY: inputAnims[4].interpolate({ inputRange: [0,1], outputRange: [8,0] }) }] }}>
+                            <CustomInput type="password" value={confirmPassword} title="Confirmar contraseña" onChange={setConfirmPassword} required forceShowError={showErrors} />
+                        </Animated.View>
+                    </>
                 )}
-                {mode === 'register' && (
-                    <Animated.View style={{ opacity: inputAnims[4] || inputAnims[1], transform: [{ translateY: inputAnims[4] ? inputAnims[4].interpolate({ inputRange: [0,1], outputRange: [8,0] }) : inputAnims[1].interpolate({ inputRange: [0,1], outputRange: [8,0] }) }] }}>
-                        <CustomInput type="number" value={phone} title="Teléfono (opcional)" onChange={setPhone} />
-                    </Animated.View>
-                )}
-                {mode === 'register' && (
-                    <Animated.View style={{ opacity: inputAnims[2], transform: [{ translateY: inputAnims[2].interpolate({ inputRange: [0,1], outputRange: [8,0] }) }] }}>
-                        <CustomInput type="text" value={avatarUrl} title="Avatar URL (opcional)" onChange={setAvatarUrl} />
-                    </Animated.View>
-                )}
+                {/* Avatar URL removed as requested */}
                 {mode === 'register' && (
                     <Animated.View style={{ marginTop: 8 }}>
                         <Text style={{ marginBottom: 6, color: colors.muted }}>Tipo de cuenta</Text>
@@ -132,35 +144,42 @@ export default function Login({ navigation }: any) {
                             <Pressable onPress={() => setRole('user')} style={{ marginRight: 12 }}><Text style={{ color: role === 'user' ? colors.primary : colors.muted }}>Usuario</Text></Pressable>
                             <Pressable onPress={() => setRole('provider')}><Text style={{ color: role === 'provider' ? colors.primary : colors.muted }}>Proveedor</Text></Pressable>
                         </View>
-                    </Animated.View>
-                )}
-
-                {mode === 'register' && (
-                    <Animated.View style={{ marginTop: 8 }}>
-                        <Text style={{ marginBottom: 6, color: colors.muted }}>Género (para avatar por defecto)</Text>
+                        <Text style={{ marginTop: 8, marginBottom: 6, color: colors.muted }}>Género</Text>
                         <View style={{ flexDirection: 'row' }}>
                             <Pressable onPress={() => setGender('male')} style={{ marginRight: 12 }}><Text style={{ color: gender === 'male' ? colors.primary : colors.muted }}>Hombre</Text></Pressable>
-                            <Pressable onPress={() => setGender('female')} style={{ marginRight: 12 }}><Text style={{ color: gender === 'female' ? colors.primary : colors.muted }}>Mujer</Text></Pressable>
-                            <Pressable onPress={() => setGender('other')}><Text style={{ color: gender === 'other' ? colors.primary : colors.muted }}>Otro</Text></Pressable>
+                            <Pressable onPress={() => setGender('female')}><Text style={{ color: gender === 'female' ? colors.primary : colors.muted }}>Mujer</Text></Pressable>
                         </View>
                     </Animated.View>
                 )}
 
-                <Animated.View style={{ opacity: inputAnims[1], transform: [{ translateY: inputAnims[1].interpolate({ inputRange: [0,1], outputRange: [8,0] }) }] }}>
-                    <CustomInput type="email" value={email} title="Correo" onChange={setEmail} required />
-                </Animated.View>
-
-                <Animated.View style={{ opacity: inputAnims[2], transform: [{ translateY: inputAnims[2].interpolate({ inputRange: [0,1], outputRange: [8,0] }) }] }}>
-                    <CustomInput type="password" value={password} title="Contraseña" onChange={setPassword} required />
-                </Animated.View>
-
-                {mode === 'register' && (
-                    <Animated.View style={{ opacity: inputAnims[3], transform: [{ translateY: inputAnims[3].interpolate({ inputRange: [0,1], outputRange: [8,0] }) }] }}>
-                        <CustomInput type="password" value={confirmPassword} title="Confirmar contraseña" onChange={setConfirmPassword} required />
+                {mode === 'login' && (
+                    <>
+                    <Animated.View style={{ opacity: inputAnims[2], transform: [{ translateY: inputAnims[2].interpolate({ inputRange: [0,1], outputRange: [8,0] }) }] }}>
+                        <CustomInput type="email" value={email} title="Correo" onChange={setEmail} required />
                     </Animated.View>
+
+                    <Animated.View style={{ opacity: inputAnims[3], transform: [{ translateY: inputAnims[3].interpolate({ inputRange: [0,1], outputRange: [8,0] }) }] }}>
+                        <CustomInput type="password" value={password} title="Contraseña" onChange={setPassword} required />
+                    </Animated.View>
+
+                    {/* confirm handled inside register block; login doesn't need confirm */}
+                    </>
                 )}
 
                 <View style={{ marginTop: 12 }}>
+                    {mode === 'login' && savedAccounts && savedAccounts.length > 0 && (
+                        <View style={{ marginBottom: 10 }}>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                                    <Text style={{ color: colors.muted }}>Cuentas guardadas</Text>
+                                    <Pressable onPress={() => setShowAccountsModal(true)}><Text style={{ color: colors.primary }}>Ver cuentas</Text></Pressable>
+                                </View>
+                                {/* Access accounts via modal */}
+                        </View>
+                    )}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <Text style={{ color: colors.muted }}>Recordarme</Text>
+                        <Switch value={remember} onValueChange={v => setRememberLocal(v)} />
+                    </View>
                     {mode === 'login' ? (
                         <CustomButton title={i18n.t('signIn')} onPress={handleLogin} />
                     ) : (
@@ -177,7 +196,75 @@ export default function Login({ navigation }: any) {
                     <Text style={{ color: colors.muted, marginTop: 10 }}>Procesando...</Text>
                 </View>
             )}
+            <AccountsModal
+                visible={showAccountsModal}
+                onClose={() => setShowAccountsModal(false)}
+                accounts={savedAccounts || []}
+                onSelect={async (acc: any) => {
+                    // attempt automatic sign-in using secure credentials
+                    setShowAccountsModal(false);
+                    try {
+                        if (loginWithSavedAccount) {
+                            setSubmitting(true);
+                            await loginWithSavedAccount(acc.email);
+                            // success: nothing else to do — auth state will navigate
+                            return;
+                        }
+                        // fallback: prefill email only
+                        setEmail(acc.email);
+                        setMode('login');
+                    } catch (e:any) {
+                        // couldn't auto-login (no credentials or failed) -> prefill and show message
+                        setEmail(acc.email);
+                        setMode('login');
+                        Alert.alert('Autologin falló', 'No se encontraron credenciales guardadas. Por favor ingresa tu contraseña.');
+                    } finally {
+                        setSubmitting(false);
+                    }
+                }}
+                onRemove={(email: string) => { removeSavedAccount(email); }}
+            />
         </View>
+    );
+}
+
+// Modal component rendered inside the same file (simple, uses Login's savedAccounts)
+function AccountsModal({ visible, onClose, accounts, onSelect, onRemove }: any) {
+    const { colors } = useTheme();
+    return (
+        <Modal visible={visible} animationType="slide" transparent>
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.4)' }}>
+                <View style={{ width: '86%', maxHeight: '70%', backgroundColor: colors.card, borderRadius: 12, padding: 16 }}>
+                    <Text style={{ fontSize: 18, fontWeight: '700', color: colors.text, marginBottom: 8 }}>Cuentas</Text>
+                    <FlatList data={accounts} keyExtractor={(i:any)=>i.email} renderItem={({ item }: any) => (
+                        <View style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                            {item.displayName ? (
+                                <>
+                                    <Text style={{ color: colors.text, fontWeight: '700' }}>{item.displayName}</Text>
+                                    <Text style={{ color: colors.muted, fontSize: 12 }}>{item.email}</Text>
+                                </>
+                            ) : (
+                                <Text style={{ color: colors.text, fontWeight: '700' }}>{item.email}</Text>
+                            )}
+                            <View style={{ flexDirection: 'row', marginTop: 8 }}>
+                                <TouchableOpacity onPress={() => onSelect(item)} style={{ marginRight: 12, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: colors.primary, borderRadius: 8 }}>
+                                    <Text style={{ color: '#fff' }}>Usar cuenta</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => onRemove(item.email)} style={{ paddingVertical: 8, paddingHorizontal: 12, backgroundColor: colors.surface, borderRadius: 8 }}>
+                                    <Text style={{ color: colors.text }}>Eliminar</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    )} />
+                    <View style={{ marginTop: 12 }}>
+                        <Text style={{ color: colors.muted, fontSize: 12 }}>Nota: para iniciar sesión automáticamente sin contraseña necesitas habilitar "guardar contraseña" de forma segura (Keychain/SecureStore). Esto no está activado por defecto.</Text>
+                    </View>
+                    <View style={{ marginTop: 12, flexDirection: 'row', justifyContent: 'flex-end' }}>
+                        <TouchableOpacity onPress={onClose} style={{ paddingVertical: 8, paddingHorizontal: 12 }}><Text style={{ color: colors.primary }}>Cerrar</Text></TouchableOpacity>
+                    </View>
+                </View>
+            </View>
+        </Modal>
     );
 }
 

@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
+import { useRefresh } from '../contexts/RefreshContext';
 import { useAuth } from '../contexts/AuthContext';
-import firestore from '@react-native-firebase/firestore';
+// removed direct firestore import; using service helpers instead
 import { getReservationsForUser } from '../services/firestoreService';
+import { useFocusEffect } from '@react-navigation/native';
 
 export default function Chat({ navigation }: any) {
     const { colors } = useTheme();
@@ -21,22 +23,20 @@ export default function Chat({ navigation }: any) {
                 return;
             }
 
-            // Query reservations where userId == uid and providerId == uid (two queries) and combine
-            const userSnap = await firestore().collection('reservations').where('userId', '==', uid).get();
-            const provSnap = await firestore().collection('reservations').where('providerId', '==', uid).get();
-            const docs = [...userSnap.docs, ...provSnap.docs];
+            // Combine reservations where user is client or provider
+            const svc = await import('../services/firestoreService');
+            const userReservations = await svc.getReservationsForUser((user as any).email || '');
+            const providerReservations = await svc.getPendingReservationsForProvider(uid).catch(() => []);
+            const combined = [...(userReservations || []), ...(providerReservations || [])];
             const map: Record<string, any> = {};
-            for (const d of docs) {
-                const data = d.data() as any;
-                map[d.id] = { id: d.id, ...data };
-            }
+            for (const r of combined) map[r.id || ''] = r;
             const list = Object.values(map) as any[];
 
-            // For each reservation fetch the last message (if any)
+            // For each reservation fetch the last message (one-time, paginated)
             const conversationsWithLast = await Promise.all(list.map(async (r) => {
                 try {
-                    const msgs = await firestore().collection('reservations').doc(r.id).collection('messages').orderBy('createdAtClient', 'desc').limit(1).get();
-                    const last = msgs.empty ? null : { id: msgs.docs[0].id, ...(msgs.docs[0].data() as any) };
+                    const page = await (await import('../services/firestoreService')).loadMessagesPage(r.id, 1);
+                    const last = page.messages.length ? page.messages[page.messages.length - 1] : null;
                     return { reservationId: r.id, name: r.providerDisplayName || r.name || r.userEmail || 'Contacto', lastMessage: last, status: r.status };
                 } catch (e) {
                     return { reservationId: r.id, name: r.providerDisplayName || r.name || r.userEmail || 'Contacto', lastMessage: null, status: r.status };
@@ -59,15 +59,23 @@ export default function Chat({ navigation }: any) {
         }
     };
 
-    useEffect(() => {
-        loadConversations();
-        const uid = (user as any)?.uid;
-        if (!uid) return;
-        // realtime: listen for reservation changes where user is participant
-        const unsub1 = firestore().collection('reservations').where('userId', '==', uid).onSnapshot(() => loadConversations(), () => {});
-        const unsub2 = firestore().collection('reservations').where('providerId', '==', uid).onSnapshot(() => loadConversations(), () => {});
-        return () => { unsub1(); unsub2(); };
-    }, [user]);
+    // load on focus (one-time) instead of realtime listeners
+    useFocusEffect(
+        useCallback(() => {
+            loadConversations();
+            // no realtime listeners: avoid continuous updates and extra Firestore calls
+            return () => {};
+        }, [user])
+    );
+
+    // register global refresh
+    const refreshCtx = useRefresh();
+    const refreshHandler = useCallback(async () => { await loadConversations(); }, [user]);
+    React.useEffect(() => {
+        const id = 'Chat';
+        refreshCtx.register(id, refreshHandler);
+        return () => refreshCtx.unregister(id);
+    }, [refreshHandler]);
 
     if (loading) return <View style={[styles.container, { backgroundColor: colors.background }]}><ActivityIndicator /></View>;
 

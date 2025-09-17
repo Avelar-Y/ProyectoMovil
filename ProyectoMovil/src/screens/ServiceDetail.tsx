@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Image, TextInput, Alert, FlatList, ActivityIndicator, ScrollView, TouchableOpacity, Platform, Linking } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../contexts/ThemeContext';
+import { useRefresh } from '../contexts/RefreshContext';
 import CustomButton from '../components/CustomButton';
 import { useAuth } from '../contexts/AuthContext';
 import { saveReservation, getReservationsForService, getUserProfile, updateUserProfile } from '../services/firestoreService';
@@ -84,6 +85,26 @@ export default function ServiceDetail({ route, navigation }: any) {
         })();
         return () => { mounted = false };
     }, [service]);
+
+    // register refresh handler so global pull-to-refresh reloads reservations and owner info
+    const refreshCtx = useRefresh();
+    const serviceDetailHandler = React.useCallback(async () => {
+        try {
+            if (!service) return;
+            const idOrKey = service.id || service.key || service;
+            const res = await getReservationsForService(idOrKey);
+            setReservations(res || []);
+            if (service.ownerId) {
+                const so = await getUserProfile(service.ownerId);
+                setServiceOwner(so || null);
+            }
+        } catch (e) { console.warn('ServiceDetail global refresh failed', e); }
+    }, [service]);
+    React.useEffect(() => {
+        const id = `ServiceDetail-${service?.id || service?.key || String(service)}`;
+        refreshCtx.register(id, serviceDetailHandler);
+        return () => refreshCtx.unregister(id);
+    }, [serviceDetailHandler]);
 
     const handleReserve = async () => {
         if (!date) {

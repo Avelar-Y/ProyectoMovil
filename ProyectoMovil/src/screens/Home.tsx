@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, FlatList, Modal, Pressable, ActivityIndicator, Alert, TextInput, Keyboard } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
-import firestore from '@react-native-firebase/firestore';
 import CustomButton from '../components/CustomButton';
 import { useTheme } from '../contexts/ThemeContext';
+import { useRefresh } from '../contexts/RefreshContext';
 
 // Versión limpia y única de Home.tsx para evitar duplicados y errores de JSX
 export default function Home({ navigation }: any) {
@@ -16,40 +16,70 @@ export default function Home({ navigation }: any) {
   const [loadingServices, setLoadingServices] = useState(true);
   const [showProfile, setShowProfile] = useState(false);
 
+  // Cargar servicios una sola vez (no realtime). La función loadServicesOnce
+  // ya existe más abajo y también está registrada en RefreshContext.
   useEffect(() => {
-    const unsubscribe = firestore()
-      .collection('services')
-      .where('active', '==', true)
-      .orderBy('createdAt', 'desc')
-      .onSnapshot(
-        qs => {
-          const items: any[] = [];
-          qs.forEach(doc => {
-            const data: any = doc.data();
-            items.push({
-              id: doc.id,
-              key: (data.key as string) || doc.id,
-              title: data.title || data.key || 'Servicio',
-              img: data.icon || data.img || 'https://cdn-icons-png.flaticon.com/512/854/854878.png',
-              price: data.price ? String(data.price) : '$',
-              description: data.description || data.desc || '',
-              duration: data.duration || data.time || null,
-              tags: Array.isArray(data.tags) ? data.tags : [],
-              createdAtMillis: data.createdAt && data.createdAt.toMillis ? data.createdAt.toMillis() : null,
-              ...data,
-            });
-          });
-          setServices(items);
-          setLoadingServices(false);
-        },
-        err => {
-          console.warn('services onSnapshot error', err);
-          setLoadingServices(false);
-        }
-      );
-
-    return () => unsubscribe();
+    let mounted = true;
+    (async () => {
+      try {
+        const docs = await (async () => {
+          try {
+            return await (await import('../services/firestoreService')).getServices();
+          } catch (e) {
+            console.warn('getServices failed, returning empty list as fallback', e);
+            return [];
+          }
+        })();
+        await loadServicesOnce();
+      } catch (e) {
+        console.warn('loadServicesOnce error on mount', e);
+      } finally {
+        if (mounted) setLoadingServices(false);
+      }
+    })();
+    return () => { mounted = false; };
   }, []);
+
+  // register a manual reload handler for global refresh
+  const refreshCtx = useRefresh();
+  const loadServicesOnce = async () => {
+    try {
+      // use the service helper to get services and fallback client-side if needed
+      const docs = await (async () => {
+        try {
+          return await (await import('../services/firestoreService')).getServices();
+        } catch (e) {
+          console.warn('getServices failed, returning empty list as fallback', e);
+          return [];
+        }
+      })();
+
+      const formatted = docs.map((data: any) => ({
+        id: data.id,
+        key: (data.key as string) || data.id,
+        title: data.title || data.key || 'Servicio',
+        img: data.icon || data.img || 'https://cdn-icons-png.flaticon.com/512/854/854878.png',
+        price: data.price ? String(data.price) : '$',
+        description: data.description || data.desc || '',
+        duration: data.duration || data.time || null,
+        tags: Array.isArray(data.tags) ? data.tags : [],
+        createdAtMillis: data.createdAt && data.createdAt.toMillis ? data.createdAt.toMillis() : (data.createdAtClient || null),
+        ...data,
+      }));
+      // sort by createdAtMillis desc
+      formatted.sort((a: any, b: any) => (b.createdAtMillis || 0) - (a.createdAtMillis || 0));
+      setServices(formatted);
+      setLoadingServices(false);
+    } catch (e) {
+      console.warn('loadServicesOnce error', e);
+    }
+  };
+  const loadServicesHandler = React.useCallback(async () => { await loadServicesOnce(); }, []);
+  React.useEffect(() => {
+    const id = 'Home';
+    refreshCtx.register(id, loadServicesHandler);
+    return () => refreshCtx.unregister(id);
+  }, [loadServicesHandler]);
 
   const filteredServices = services.filter(s => {
     if (!query) return true;
@@ -203,7 +233,7 @@ export default function Home({ navigation }: any) {
               <Text style={{ color: colors.text, fontWeight: '700' }}>{user?.email || 'Usuario'}</Text>
               <View style={{ marginTop: 12 }}>
                 <Pressable onPress={() => { setShowProfile(false); }} style={styles.modalButton}><Text>Cerrar</Text></Pressable>
-                <Pressable onPress={async () => { await logout(); setShowProfile(false); }} style={[styles.modalButton, { backgroundColor: colors.primary }]}><Text style={{ color: '#fff' }}>Cerrar sesión</Text></Pressable>
+                <Pressable onPress={async () => { try { await logout(); } catch (e) { console.warn('logout failed', e); } finally { setShowProfile(false); } }} style={[styles.modalButton, { backgroundColor: colors.primary }]}><Text style={{ color: '#fff' }}>Cerrar sesión</Text></Pressable>
               </View>
             </View>
           </View>

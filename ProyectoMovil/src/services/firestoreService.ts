@@ -1,5 +1,25 @@
-import firestore from '@react-native-firebase/firestore';
+import {
+  getFirestore,
+  collection,
+  doc,
+  addDoc,
+  setDoc,
+  updateDoc,
+  getDocs,
+  getDoc,
+  query,
+  where,
+  orderBy,
+  limit as limitFn,
+  startAfter,
+  serverTimestamp,
+  arrayUnion,
+  runTransaction,
+  onSnapshot,
+} from '@react-native-firebase/firestore';
 import type { FirebaseFirestoreTypes } from '@react-native-firebase/firestore';
+
+const db = getFirestore();
 
 export type Reservation = {
   id?: string;
@@ -67,9 +87,9 @@ export const saveReservation = async (reservation: Omit<Reservation, 'id' | 'cre
     };
 
     const cleaned = sanitize(reservation);
-    const data = { ...cleaned, createdAt: firestore.FieldValue.serverTimestamp(), createdAtClient: Date.now() } as any;
-    const docRef = await firestore().collection('reservations').add(data);
-    return docRef.id;
+  const data = { ...cleaned, createdAt: serverTimestamp(), createdAtClient: Date.now() } as any;
+  const docRef = await addDoc(collection(db, 'reservations'), data);
+  return docRef.id;
   } catch (err) {
     console.error('saveReservation error', err);
     throw err;
@@ -77,9 +97,9 @@ export const saveReservation = async (reservation: Omit<Reservation, 'id' | 'cre
 };
 
 export const updateReservationStatus = async (reservationId: string, status: Reservation['status']) => {
-  try {
-    await firestore().collection('reservations').doc(reservationId).update({ status });
-  } catch (err) {
+    try {
+      await updateDoc(doc(db, 'reservations', reservationId), { status });
+    } catch (err) {
     console.error('updateReservationStatus error', err);
     throw err;
   }
@@ -89,7 +109,7 @@ export const updatePaymentInfo = async (reservationId: string, paymentInfo: any,
   try {
     const payload: any = { paymentInfo };
     if (paymentStatus) payload.paymentStatus = paymentStatus;
-    await firestore().collection('reservations').doc(reservationId).update(payload);
+    await updateDoc(doc(db, 'reservations', reservationId), payload);
   } catch (err) {
     console.error('updatePaymentInfo error', err);
     throw err;
@@ -99,26 +119,20 @@ export const updatePaymentInfo = async (reservationId: string, paymentInfo: any,
 export const getReservationsForUser = async (userEmail: string) : Promise<Reservation[]> => {
   try {
     // Order by client timestamp for immediate visibility; server timestamp will sync later.
-    const orderedQuery = firestore()
-      .collection('reservations')
-      .where('userEmail', '==', userEmail)
-      .orderBy('createdAtClient', 'desc');
+    const orderedQuery = query(collection(db, 'reservations'), where('userEmail', '==', userEmail), orderBy('createdAtClient', 'desc'));
     try {
-      const snap = await orderedQuery.get();
-      return snap.docs.map(d => ({ id: d.id, ...(d.data() as Reservation) }));
+      const snap = await getDocs(orderedQuery);
+  return snap.docs.map((d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as Reservation) }));
     } catch (err: any) {
       // Si la query falla porque requiere un índice, hacemos un fallback: obtener sin orderBy y ordenar en cliente
       const message = err?.message || '';
       const code = err?.code || '';
       if (code === 'failed-precondition' || /requires an index/i.test(message)) {
         console.warn('Ordered reservations query requires an index, falling back to client-side ordering.');
-        const snap = await firestore()
-          .collection('reservations')
-          .where('userEmail', '==', userEmail)
-          .get();
-        const docs = snap.docs.map(d => ({ id: d.id, ...(d.data() as Reservation) }));
+          const snap = await getDocs(query(collection(db, 'reservations'), where('userEmail', '==', userEmail)));
+          const docs = snap.docs.map((d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as Reservation) }));
         // Normalizar createdAtClient y createdAt
-        const normalized = docs.map(d => {
+        const normalized = docs.map((d: Reservation) => {
           const dataAny: any = d as any;
           if (!dataAny.createdAtClient && dataAny.createdAt && typeof dataAny.createdAt.toMillis === 'function') {
             dataAny.createdAtClient = dataAny.createdAt.toMillis();
@@ -144,8 +158,6 @@ export type Service = {
   title: string;
   description?: string;
   price?: number;
-  duration?: number;
-  icon?: string;
   key?: string;
   tags?: string[];
   active?: boolean;
@@ -153,7 +165,6 @@ export type Service = {
   ownerId?: string;
   ownerPhone?: string;
   ownerDisplayName?: string;
-  createdAt?: FirebaseFirestoreTypes.Timestamp | null;
   createdAtClient?: number;
 };
 
@@ -181,8 +192,8 @@ export const saveService = async (service: Omit<Service, 'id' | 'createdAt'>) =>
     };
 
     const cleaned = sanitize(service) || {};
-    const data = { ...cleaned, createdAt: firestore.FieldValue.serverTimestamp(), createdAtClient: Date.now() } as any;
-    const docRef = await firestore().collection('services').add(data);
+    const data = { ...cleaned, createdAt: serverTimestamp(), createdAtClient: Date.now() } as any;
+  const docRef = await addDoc(collection(db, 'services'), data);
     return docRef.id;
   } catch (err) {
     console.error('saveService error', err);
@@ -192,8 +203,8 @@ export const saveService = async (service: Omit<Service, 'id' | 'createdAt'>) =>
 
 export const getServices = async (): Promise<Service[]> => {
   try {
-    const snap = await firestore().collection('services').get();
-    return snap.docs.map(d => ({ id: d.id, ...(d.data() as Service) }));
+    const snap = await getDocs(collection(db, 'services'));
+    return snap.docs.map((d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as Service) }));
   } catch (err) {
     console.error('getServices error', err);
     throw err;
@@ -202,8 +213,8 @@ export const getServices = async (): Promise<Service[]> => {
 
 export const getServicesForProvider = async (providerId: string): Promise<Service[]> => {
   try {
-    const snap = await firestore().collection('services').where('ownerId', '==', providerId).get();
-    return snap.docs.map(d => ({ id: d.id, ...(d.data() as Service) }));
+  const snap = await getDocs(query(collection(db, 'services'), where('ownerId', '==', providerId)));
+  return snap.docs.map((d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as Service) }));
   } catch (err) {
     console.error('getServicesForProvider error', err);
     throw err;
@@ -212,26 +223,22 @@ export const getServicesForProvider = async (providerId: string): Promise<Servic
 
 export const getReservationsForService = async (serviceIdOrKey: string) => {
   try {
-    const snap = await firestore()
-      .collection('reservations')
-      .where('service', '==', serviceIdOrKey)
-      .orderBy('createdAtClient', 'desc')
-      .get();
-    return snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+    const snap = await getDocs(query(collection(db, 'reservations'), where('service', '==', serviceIdOrKey), orderBy('createdAtClient', 'desc')));
+    return snap.docs.map((d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as any) }));
   } catch (err: any) {
     console.warn('getReservationsForService fallback to unordered fetch', err);
     // fallback without orderBy
-    const snap = await firestore().collection('reservations').where('service', '==', serviceIdOrKey).get();
-    return snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+    const snap = await getDocs(query(collection(db, 'reservations'), where('service', '==', serviceIdOrKey)));
+    return snap.docs.map((d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as any) }));
   }
 };
 
 export const getUserProfile = async (uid: string) => {
   try {
-    const doc = await firestore().collection('users').doc(uid).get();
-    // doc.exists puede ser una propiedad booleana o un método depending on SDK typings
-    const exists = typeof (doc as any).exists === 'function' ? (doc as any).exists() : (doc as any).exists;
-    return exists ? (doc.data() as any) : null;
+  const docRef = doc(db, 'users', uid);
+  const snap = await getDoc(docRef);
+    const exists = snap.exists();
+    return exists ? (snap.data() as any) : null;
   } catch (err) {
     console.error('getUserProfile error', err);
     throw err;
@@ -240,7 +247,7 @@ export const getUserProfile = async (uid: string) => {
 
 export const updateUserProfile = async (uid: string, data: Record<string, any>) => {
   try {
-    await firestore().collection('users').doc(uid).set({ ...data, updatedAt: firestore.FieldValue.serverTimestamp() }, { merge: true });
+  await setDoc(doc(db, 'users', uid), { ...data, updatedAt: serverTimestamp() }, { merge: true });
   } catch (err) {
     console.error('updateUserProfile error', err);
     throw err;
@@ -250,22 +257,17 @@ export const updateUserProfile = async (uid: string, data: Record<string, any>) 
 // --- Active reservation and messaging helpers ---
 export const getActiveReservationForUser = async (uid: string): Promise<Reservation | null> => {
   try {
-    const snap = await firestore()
-      .collection('reservations')
-      .where('userId', '==', uid)
-      .where('status', 'in', ['pending', 'confirmed', 'in_progress'])
-      .orderBy('createdAtClient', 'desc')
-      .limit(1)
-      .get();
+    const q = query(collection(db, 'reservations'), where('userId', '==', uid), where('status', 'in', ['pending', 'confirmed', 'in_progress']), orderBy('createdAtClient', 'desc'), limitFn(1));
+    const snap = await getDocs(q);
     if (snap.empty) return null;
     const d = snap.docs[0];
     return { id: d.id, ...(d.data() as Reservation) };
   } catch (err: any) {
     // if 'in' queries or orderBy requires index, fallback to client filter
     try {
-      const snap = await firestore().collection('reservations').where('userId', '==', uid).get();
-      const docs = snap.docs.map(d => ({ id: d.id, ...(d.data() as Reservation) }));
-      const filtered = docs.filter(r => ['pending', 'confirmed', 'in_progress'].includes(r.status || ''));
+      const snap = await getDocs(query(collection(db, 'reservations'), where('userId', '==', uid)));
+  const docs = snap.docs.map((d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as Reservation) }));
+  const filtered = docs.filter((r: Reservation) => ['pending', 'confirmed', 'in_progress'].includes(r.status || ''));
       filtered.sort((a: any, b: any) => (b.createdAtClient || 0) - (a.createdAtClient || 0));
       return filtered.length > 0 ? filtered[0] : null;
     } catch (e) {
@@ -277,22 +279,17 @@ export const getActiveReservationForUser = async (uid: string): Promise<Reservat
 
 export const getActiveReservationForProvider = async (providerId: string): Promise<Reservation | null> => {
   try {
-    const snap = await firestore()
-      .collection('reservations')
-      .where('providerId', '==', providerId)
-      .where('status', 'in', ['pending', 'confirmed', 'in_progress'])
-      .orderBy('createdAtClient', 'desc')
-      .limit(1)
-      .get();
+    const q = query(collection(db, 'reservations'), where('providerId', '==', providerId), where('status', 'in', ['pending', 'confirmed', 'in_progress']), orderBy('createdAtClient', 'desc'), limitFn(1));
+    const snap = await getDocs(q);
     if (snap.empty) return null;
     const d = snap.docs[0];
     return { id: d.id, ...(d.data() as Reservation) };
   } catch (err: any) {
     // fallback to client-side filter if needed
     try {
-      const snap = await firestore().collection('reservations').where('providerId', '==', providerId).get();
-      const docs = snap.docs.map(d => ({ id: d.id, ...(d.data() as Reservation) }));
-      const filtered = docs.filter(r => ['pending', 'confirmed', 'in_progress'].includes(r.status || ''));
+      const snap = await getDocs(query(collection(db, 'reservations'), where('providerId', '==', providerId)));
+      const docs = snap.docs.map((d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as Reservation) }));
+  const filtered = docs.filter((r: Reservation) => ['pending', 'confirmed', 'in_progress'].includes(r.status || ''));
       filtered.sort((a: any, b: any) => (b.createdAtClient || 0) - (a.createdAtClient || 0));
       return filtered.length > 0 ? filtered[0] : null;
     } catch (e) {
@@ -306,7 +303,7 @@ export const getActiveReservationForProvider = async (providerId: string): Promi
 export const getPendingReservationsForProvider = async (providerId: string): Promise<Reservation[]> => {
   try {
     // Only consider reservations that target services owned by this provider
-    const services = await getServicesForProvider(providerId);
+  const services = await getServicesForProvider(providerId);
     const serviceIds = (services || []).map(s => s.id).filter(Boolean) as string[];
     if (!serviceIds || serviceIds.length === 0) return [];
 
@@ -317,8 +314,8 @@ export const getPendingReservationsForProvider = async (providerId: string): Pro
 
     const results: Reservation[] = [];
     for (const ch of chunks) {
-      const q = firestore().collection('reservations').where('service', 'in', ch).where('status', '==', 'pending');
-      const snap = await q.get();
+      const q = query(collection(db, 'reservations'), where('service', 'in', ch), where('status', '==', 'pending'));
+      const snap = await getDocs(q);
       for (const d of snap.docs) {
         results.push({ id: d.id, ...(d.data() as Reservation) });
       }
@@ -347,18 +344,14 @@ export const getPendingReservationsForProvider = async (providerId: string): Pro
 // Get active reservations (accepted/confirmed/in_progress) for this provider
 export const getActiveReservationsForProvider = async (providerId: string): Promise<Reservation[]> => {
   try {
-    const snap = await firestore()
-      .collection('reservations')
-      .where('providerId', '==', providerId)
-      .where('status', 'in', ['confirmed', 'in_progress'])
-      .get();
-    return snap.docs.map(d => ({ id: d.id, ...(d.data() as Reservation) }));
+    const snap = await getDocs(query(collection(db, 'reservations'), where('providerId', '==', providerId), where('status', 'in', ['confirmed', 'in_progress'])));
+    return snap.docs.map((d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as Reservation) }));
   } catch (err: any) {
     // fallback for SDKs that don't allow multiple where in some combinations
     try {
-      const snap = await firestore().collection('reservations').where('providerId', '==', providerId).get();
-      const docs = snap.docs.map(d => ({ id: d.id, ...(d.data() as Reservation) }));
-      return docs.filter(r => ['confirmed', 'in_progress'].includes(r.status || ''));
+      const snap = await getDocs(query(collection(db, 'reservations'), where('providerId', '==', providerId)));
+      const docs = snap.docs.map((d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as Reservation) }));
+      return docs.filter((r: Reservation) => ['confirmed', 'in_progress'].includes(r.status || ''));
     } catch (e) {
       console.error('getActiveReservationsForProvider fallback error', e);
       throw e;
@@ -367,9 +360,9 @@ export const getActiveReservationsForProvider = async (providerId: string): Prom
 };
 
 export const listenReservation = (reservationId: string, onChange: (data: Reservation | null) => void) => {
-  const ref = firestore().collection('reservations').doc(reservationId);
-  const unsub = ref.onSnapshot(snap => {
-    if (!snap.exists) return onChange(null);
+  const ref = doc(db, 'reservations', reservationId);
+  const unsub = onSnapshot(ref, snap => {
+    if (!snap.exists()) return onChange(null);
     onChange({ id: snap.id, ...(snap.data() as Reservation) });
   }, err => {
     console.warn('listenReservation error', err);
@@ -378,9 +371,9 @@ export const listenReservation = (reservationId: string, onChange: (data: Reserv
 };
 
 export const listenMessages = (reservationId: string, onMessage: (messages: any[]) => void) => {
-  const ref = firestore().collection('reservations').doc(reservationId).collection('messages').orderBy('createdAtClient', 'asc');
-  const unsub = ref.onSnapshot(snap => {
-    const msgs = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+  const ref = query(collection(db, 'reservations', reservationId, 'messages'), orderBy('createdAtClient', 'asc'));
+  const unsub = onSnapshot(ref as any, snap => {
+    const msgs = snap.docs.map((d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as any) }));
     onMessage(msgs);
   }, err => {
     console.warn('listenMessages error', err);
@@ -391,11 +384,11 @@ export const listenMessages = (reservationId: string, onMessage: (messages: any[
 // Load messages in pages (most recent last). If startAfterDoc is provided, loads messages before that doc (older messages).
 export const loadMessagesPage = async (reservationId: string, limit = 25, startAfterDoc?: FirebaseFirestoreTypes.DocumentSnapshot) => {
   try {
-    let q = firestore().collection('reservations').doc(reservationId).collection('messages').orderBy('createdAtClient', 'desc').limit(limit);
-    if (startAfterDoc) q = q.startAfter(startAfterDoc);
-    const snap = await q.get();
+    let q = query(collection(db, 'reservations', reservationId, 'messages'), orderBy('createdAtClient', 'desc'), limitFn(limit));
+    if (startAfterDoc) q = query(q, startAfter(startAfterDoc as any));
+    const snap = await getDocs(q as any);
     // return in ascending order for rendering
-    const docs = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+    const docs = snap.docs.map((d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as any) }));
     return { messages: docs.reverse(), lastVisible: snap.docs[snap.docs.length - 1] };
   } catch (err) {
     console.error('loadMessagesPage error', err);
@@ -406,11 +399,9 @@ export const loadMessagesPage = async (reservationId: string, limit = 25, startA
 // Listen only for new messages after a given client timestamp
 export const listenNewMessages = (reservationId: string, sinceClientTimestamp: number, onNew: (msgs: any[]) => void) => {
   try {
-    const ref = firestore().collection('reservations').doc(reservationId).collection('messages')
-      .where('createdAtClient', '>', sinceClientTimestamp)
-      .orderBy('createdAtClient', 'asc');
-    const unsub = ref.onSnapshot(snap => {
-      const docs = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+    const ref = query(collection(db, 'reservations', reservationId, 'messages'), where('createdAtClient', '>', sinceClientTimestamp), orderBy('createdAtClient', 'asc'));
+    const unsub = onSnapshot(ref as any, snap => {
+      const docs = snap.docs.map((d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as any) }));
       onNew(docs);
     }, err => console.warn('listenNewMessages error', err));
     return unsub;
@@ -422,8 +413,8 @@ export const listenNewMessages = (reservationId: string, sinceClientTimestamp: n
 
 export const sendMessage = async (reservationId: string, message: { authorId?: string; text: string; attachments?: string[] }) => {
   try {
-    const payload: any = { ...message, createdAt: firestore.FieldValue.serverTimestamp(), createdAtClient: Date.now() };
-    const ref = await firestore().collection('reservations').doc(reservationId).collection('messages').add(payload);
+    const payload: any = { ...message, createdAt: serverTimestamp(), createdAtClient: Date.now() };
+    const ref = await addDoc(collection(db, 'reservations', reservationId, 'messages'), payload);
     return ref.id;
   } catch (err) {
     console.error('sendMessage error', err);
@@ -433,9 +424,9 @@ export const sendMessage = async (reservationId: string, message: { authorId?: s
 
 export const cancelReservation = async (reservationId: string, reason?: string) => {
   try {
-    const payload: any = { status: 'cancelled', updatedAt: firestore.FieldValue.serverTimestamp(), cancelledAt: firestore.FieldValue.serverTimestamp() };
+    const payload: any = { status: 'cancelled', updatedAt: serverTimestamp(), cancelledAt: serverTimestamp() };
     if (reason) payload.cancelReason = reason;
-    await firestore().collection('reservations').doc(reservationId).update(payload);
+    await updateDoc(doc(db, 'reservations', reservationId), payload);
   } catch (err) {
     console.error('cancelReservation error', err);
     throw err;
@@ -444,7 +435,7 @@ export const cancelReservation = async (reservationId: string, reason?: string) 
 
 export const acceptReservation = async (reservationId: string) => {
   try {
-    await firestore().collection('reservations').doc(reservationId).update({ status: 'in_progress', updatedAt: firestore.FieldValue.serverTimestamp() });
+    await updateDoc(doc(db, 'reservations', reservationId), { status: 'in_progress', updatedAt: serverTimestamp() });
   } catch (err) {
     console.error('acceptReservation error', err);
     throw err;
@@ -458,8 +449,8 @@ export const updateReservation = async (reservationId: string, data: Record<stri
     for (const k of Object.keys(data)) {
       if (data[k] !== undefined) cleaned[k] = data[k];
     }
-    cleaned.updatedAt = firestore.FieldValue.serverTimestamp();
-    await firestore().collection('reservations').doc(reservationId).set(cleaned, { merge: true });
+    cleaned.updatedAt = serverTimestamp();
+    await setDoc(doc(db, 'reservations', reservationId), cleaned, { merge: true });
   } catch (err) {
     console.error('updateReservation error', err);
     throw err;
@@ -469,15 +460,15 @@ export const updateReservation = async (reservationId: string, data: Record<stri
 // Notification helper: write an in-app notification document (clients can listen to this collection)
 export const sendInAppNotification = async (toUserId: string | null, payload: { title: string; body?: string; data?: Record<string, any> }) => {
   try {
-    const doc = {
+    const docObj = {
       to: toUserId,
       title: payload.title,
       body: payload.body || '',
       data: payload.data || {},
       read: false,
-      createdAt: firestore.FieldValue.serverTimestamp(),
+      createdAt: serverTimestamp(),
     } as any;
-    const ref = await firestore().collection('notifications').add(doc);
+    const ref = await addDoc(collection(db, 'notifications'), docObj);
     return ref.id;
   } catch (err) {
     console.error('sendInAppNotification error', err);
@@ -488,30 +479,30 @@ export const sendInAppNotification = async (toUserId: string | null, payload: { 
 // Provider accepts a reservation atomically: ensures it was pending and assigns the provider
 export const acceptReservationAndAssign = async (reservationId: string, providerId: string) => {
   try {
-    await firestore().runTransaction(async (tx) => {
-      const ref = firestore().collection('reservations').doc(reservationId);
+    await runTransaction(db, async (tx) => {
+      const ref = doc(db, 'reservations', reservationId);
       const snap = await tx.get(ref as any);
-      if (!snap.exists) throw new Error('Reservation not found');
+      if (!snap.exists()) throw new Error('Reservation not found');
       const data = snap.data() as any;
       const status = data.status || 'pending';
       if (status !== 'pending') throw new Error('Reservation is not pending');
       // assign provider and set status
       tx.update(ref as any, {
         providerId,
-        assignedAt: firestore.FieldValue.serverTimestamp(),
+        assignedAt: serverTimestamp(),
         status: 'in_progress',
-        updatedAt: firestore.FieldValue.serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
       // write a notification to the client
       const clientId = data.userId || null;
       if (clientId) {
-        tx.set(firestore().collection('notifications').doc(), {
+        tx.set(doc(collection(db, 'notifications')), {
           to: clientId,
           title: 'Tu servicio fue aceptado',
           body: `Tu servicio ha sido aceptado por un proveedor.`,
           data: { reservationId, providerId },
           read: false,
-          createdAt: firestore.FieldValue.serverTimestamp(),
+          createdAt: serverTimestamp(),
         } as any);
       }
     });
@@ -524,9 +515,9 @@ export const acceptReservationAndAssign = async (reservationId: string, provider
 // Provider rejects a reservation: mark in rejectedBy array so we don't offer it repeatedly
 export const rejectReservationByProvider = async (reservationId: string, providerId: string) => {
   try {
-    await firestore().collection('reservations').doc(reservationId).update({
-      rejectedBy: firestore.FieldValue.arrayUnion(providerId),
-      updatedAt: firestore.FieldValue.serverTimestamp(),
+    await updateDoc(doc(db, 'reservations', reservationId), {
+      rejectedBy: arrayUnion(providerId),
+      updatedAt: serverTimestamp(),
     });
   } catch (err) {
     console.error('rejectReservationByProvider error', err);
@@ -537,12 +528,12 @@ export const rejectReservationByProvider = async (reservationId: string, provide
 // Provider starts the service (mark started)
 export const startService = async (reservationId: string, providerId: string) => {
   try {
-    const ref = firestore().collection('reservations').doc(reservationId);
-    const snap = await ref.get();
-    if (!snap.exists) throw new Error('Reservation not found');
+    const ref = doc(db, 'reservations', reservationId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw new Error('Reservation not found');
     const data = snap.data() as any;
     if (data.providerId !== providerId) throw new Error('Not assigned provider');
-    await ref.update({ status: 'in_progress', startedAt: firestore.FieldValue.serverTimestamp(), updatedAt: firestore.FieldValue.serverTimestamp() });
+    await updateDoc(ref, { status: 'in_progress', startedAt: serverTimestamp(), updatedAt: serverTimestamp() });
   } catch (err) {
     console.error('startService error', err);
     throw err;
@@ -552,22 +543,22 @@ export const startService = async (reservationId: string, providerId: string) =>
 // Provider marks the service finished
 export const finishService = async (reservationId: string, providerId: string) => {
   try {
-    const ref = firestore().collection('reservations').doc(reservationId);
-    const snap = await ref.get();
-    if (!snap.exists) throw new Error('Reservation not found');
+    const ref = doc(db, 'reservations', reservationId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw new Error('Reservation not found');
     const data = snap.data() as any;
     if (data.providerId !== providerId) throw new Error('Not assigned provider');
-    await ref.update({ status: 'completed', finishedAt: firestore.FieldValue.serverTimestamp(), updatedAt: firestore.FieldValue.serverTimestamp() });
+    await updateDoc(ref, { status: 'completed', finishedAt: serverTimestamp(), updatedAt: serverTimestamp() });
     // notify client that service finished (client should confirm and pay)
     const clientId = data.userId || null;
     if (clientId) {
-      await firestore().collection('notifications').add({
+      await addDoc(collection(db, 'notifications'), {
         to: clientId,
         title: 'Servicio finalizado',
         body: `El proveedor ha marcado el servicio como finalizado. Confirma y califica.`,
         data: { reservationId },
         read: false,
-        createdAt: firestore.FieldValue.serverTimestamp(),
+        createdAt: serverTimestamp(),
       } as any);
     }
   } catch (err) {
@@ -579,12 +570,12 @@ export const finishService = async (reservationId: string, providerId: string) =
 // Client confirms completion and optionally pays
 export const confirmCompletion = async (reservationId: string, paymentInfo?: any) => {
   try {
-    const payload: any = { status: 'completed', updatedAt: firestore.FieldValue.serverTimestamp() };
+    const payload: any = { status: 'completed', updatedAt: serverTimestamp() };
     if (paymentInfo) {
       payload.paymentInfo = paymentInfo;
       payload.paymentStatus = 'paid';
     }
-    await firestore().collection('reservations').doc(reservationId).update(payload);
+    await updateDoc(doc(db, 'reservations', reservationId), payload);
   } catch (err) {
     console.error('confirmCompletion error', err);
     throw err;
@@ -595,19 +586,32 @@ export const confirmCompletion = async (reservationId: string, paymentInfo?: any
 export const saveRating = async (reservationId: string, raterId: string, targetId: string, targetType: 'provider' | 'client', rating: number, comment?: string) => {
   try {
     // Ratings stored under users/{targetId}/ratings
-    await firestore().collection('users').doc(targetId).collection('ratings').add({
+    await addDoc(collection(db, 'users', targetId, 'ratings'), {
       reservationId,
       raterId,
       rating,
       comment: comment || '',
-      createdAt: firestore.FieldValue.serverTimestamp(),
+      createdAt: serverTimestamp(),
     });
     // mark reservation that rating was given
     const key = targetType === 'provider' ? 'providerRated' : 'clientRated';
-    await firestore().collection('reservations').doc(reservationId).update({ [key]: true, updatedAt: firestore.FieldValue.serverTimestamp() });
+    await updateDoc(doc(db, 'reservations', reservationId), { [key]: true, updatedAt: serverTimestamp() });
   } catch (err) {
     console.error('saveRating error', err);
     throw err;
+  }
+};
+
+export const getReservationsByProvider = async (providerId: string) : Promise<Reservation[]> => {
+  try {
+    const snap = await getDocs(query(collection(db, 'reservations'), where('providerId', '==', providerId), orderBy('createdAtClient', 'desc')));
+    return snap.docs.map((d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as Reservation) }));
+  } catch (err: any) {
+    console.warn('getReservationsByProvider fallback to unordered fetch', err);
+    const snap = await getDocs(query(collection(db, 'reservations'), where('providerId', '==', providerId)));
+  const docs = snap.docs.map((d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as Reservation) }));
+    docs.sort((a: any, b: any) => (b.createdAtClient || 0) - (a.createdAtClient || 0));
+    return docs;
   }
 };
 

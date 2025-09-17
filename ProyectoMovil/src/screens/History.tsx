@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
-import firestore from '@react-native-firebase/firestore';
+// firestore namespaced import removed; use centralized service helpers instead
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
-import { getReservationsForUser, getUserProfile } from '../services/firestoreService';
+import { getReservationsForUser, getUserProfile, getReservationsByProvider } from '../services/firestoreService';
+import { useRefresh } from '../contexts/RefreshContext';
 
 
 export default function History({ navigation }: any) {
@@ -29,59 +30,24 @@ export default function History({ navigation }: any) {
 
                 let unsub = () => {};
                 if (provider) {
-                    // provider: listen reservations where providerId == uid
+                    // provider: load once on mount (no realtime) via service helper
                     try {
-                        unsub = firestore().collection('reservations').where('providerId', '==', uid).orderBy('createdAtClient', 'desc').onSnapshot(qs => {
-                            const items: any[] = [];
-                            qs.forEach(d => {
-                                const data = d.data();
-                                if (!data.createdAtClient && data.createdAt && data.createdAt.toMillis) data.createdAtClient = data.createdAt.toMillis();
-                                items.push({ id: d.id, ...(data as any) });
-                            });
-                            setReservations(items);
-                            setLoading(false);
-                        }, err => {
-                            console.warn('provider reservations listener failed', err);
-                            setLoading(false);
-                        });
+                        const items = await getReservationsByProvider(uid);
+                        setReservations(items);
+                        setLoading(false);
                     } catch (e) {
-                        console.warn('provider reservations listener setup failed', e);
+                        console.warn('provider reservations load failed', e);
                         setLoading(false);
                     }
                 } else {
                     // regular user: existing behavior
                     try {
-                        unsub = firestore().collection('reservations').where('userEmail', '==', user.email).orderBy('createdAtClient', 'desc').onSnapshot(qs => {
-                            const items: any[] = [];
-                            qs.forEach(d => {
-                                const data = d.data();
-                                if (!data.createdAtClient && data.createdAt && data.createdAt.toMillis) data.createdAtClient = data.createdAt.toMillis();
-                                items.push({ id: d.id, ...(data as any) });
-                            });
-                            setReservations(items);
-                            setLoading(false);
-                        }, async err => {
-                            console.warn('reservations onSnapshot error', err);
-                            try {
-                                const res = await getReservationsForUser(user.email!);
-                                setReservations(res);
-                            } catch (e) {
-                                console.warn('Fallback getReservationsForUser also failed', e);
-                            }
-                            setLoading(false);
-                        });
+                        const res = await getReservationsForUser(user.email!);
+                        setReservations(res);
+                        setLoading(false);
                     } catch (err) {
-                        console.warn('Error setting up reservations listener, using fallback', err);
-                        (async () => {
-                            try {
-                                const res = await getReservationsForUser(user.email!);
-                                setReservations(res);
-                            } catch (e) {
-                                console.warn('Fallback getReservationsForUser failed', e);
-                            } finally {
-                                setLoading(false);
-                            }
-                        })();
+                        console.warn('Fallback getReservationsForUser failed', err);
+                        setLoading(false);
                     }
                 }
 
@@ -94,6 +60,30 @@ export default function History({ navigation }: any) {
         })();
         return () => { mounted = false };
     }, [user]);
+
+    // register global refresh handler
+    const refreshCtx = useRefresh();
+    const historyRefreshHandler = React.useCallback(async () => {
+        try {
+            if (!user) return;
+            const uid = (user as any).uid;
+            const profile = await getUserProfile(uid);
+            const provider = profile?.role === 'provider';
+            setIsProvider(provider);
+            if (provider) {
+                const items = await getReservationsByProvider(uid);
+                setReservations(items);
+            } else {
+                const res = await getReservationsForUser(user.email!);
+                setReservations(res);
+            }
+        } catch (e) { console.warn('History global refresh failed', e); }
+    }, [user]);
+    React.useEffect(() => {
+        const id = 'History';
+        refreshCtx.register(id, historyRefreshHandler);
+        return () => refreshCtx.unregister(id);
+    }, [historyRefreshHandler]);
 
     useFocusEffect(
         useCallback(() => {
@@ -126,9 +116,8 @@ export default function History({ navigation }: any) {
                             if (isProvider) {
                                 const uid = (user as any)?.uid;
                                 if (uid) {
-                                    // fallback: query provider reservations once
-                                    const snap = await firestore().collection('reservations').where('providerId', '==', uid).orderBy('createdAtClient', 'desc').get();
-                                    const docs = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+                                    // fallback: query provider reservations once via service helper
+                                    const docs = await getReservationsByProvider(uid);
                                     setReservations(docs);
                                 }
                             } else {

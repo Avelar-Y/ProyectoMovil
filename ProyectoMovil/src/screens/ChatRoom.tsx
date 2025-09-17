@@ -3,6 +3,7 @@ import { View, Text, Image, StyleSheet, FlatList, TextInput, TouchableOpacity, K
 import { useTheme } from '../contexts/ThemeContext';
 import { listenMessages, sendMessage, listenReservation } from '../services/firestoreService';
 import { useAuth } from '../contexts/AuthContext';
+import { useRefresh } from '../contexts/RefreshContext';
 
 export default function ChatRoom({ route, navigation }: any) {
   const { reservationId } = route.params || {};
@@ -29,6 +30,23 @@ export default function ChatRoom({ route, navigation }: any) {
     const unsub = listenReservation(reservationId, (r) => setReservation(r));
     return () => unsub && unsub();
   }, [reservationId]);
+
+  // Register refresh handler to re-load messages and reservation
+  const refreshCtx = useRefresh();
+  const chatRoomRefreshHandler = React.useCallback(async () => {
+    if (!reservationId) return;
+    try {
+      const page = await (await import('../services/firestoreService')).loadMessagesPage(reservationId, 50);
+      setMessages(page.messages || []);
+    } catch (e) { console.warn('ChatRoom refresh failed', e); }
+  }, [reservationId]);
+
+  React.useEffect(() => {
+    if (!reservationId) return;
+    const id = `ChatRoom-${reservationId}`;
+    refreshCtx.register(id, chatRoomRefreshHandler);
+    return () => refreshCtx.unregister(id);
+  }, [chatRoomRefreshHandler]);
 
   const getStatusLabel = (r: any) => {
     if (!r) return '';

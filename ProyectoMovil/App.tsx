@@ -18,6 +18,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { LanguageProvider } from './src/contexts/LanguageContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
+import { RefreshProvider } from './src/contexts/RefreshContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 
@@ -71,9 +72,11 @@ export default function App() {
     <ThemeProvider>
       <LanguageProvider>
         <AuthProvider>
-          <ErrorBoundary>
-            <MainApp />
-          </ErrorBoundary>
+          <RefreshProvider>
+            <ErrorBoundary>
+              <MainApp />
+            </ErrorBoundary>
+          </RefreshProvider>
         </AuthProvider>
       </LanguageProvider>
     </ThemeProvider>
