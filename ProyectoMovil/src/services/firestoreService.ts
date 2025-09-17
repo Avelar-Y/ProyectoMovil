@@ -161,6 +161,7 @@ export type Service = {
   key?: string;
   tags?: string[];
   active?: boolean;
+  duration?: number; // duración estimada en minutos
   // owner/provider information (optional)
   ownerId?: string;
   ownerPhone?: string;

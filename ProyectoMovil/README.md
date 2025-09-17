@@ -95,3 +95,88 @@ To learn more about React Native, take a look at the following resources:
 - [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
 - [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
 - [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+
+## Importación de datos (Firestore Seed)
+
+Se incluyó un script para cargar datos iniciales en Firestore desde un archivo JSON.
+
+### 1. Obtener Service Account
+En Firebase Console: Configuración del proyecto -> Cuentas de servicio -> Generar nueva clave privada. Descargar y guardar el archivo como `serviceAccount.json` en la raíz del proyecto (NO lo subas al repositorio; añádelo a `.gitignore`).
+
+### 2. Preparar el archivo de datos
+Ejemplo en `data/seed-example.json`. Estructura (para servicios ahora soporta campo opcional `duration` en minutos y `tags`):
+
+```
+{
+	"users": {
+		"uid1": { "email": "user@example.com", "displayName": "Usuario" }
+	},
+	"services": {
+		"svc1": { "title": "Servicio 1", "price": 10 }
+	}
+}
+```
+
+Guarda tu propia versión como `data/seed.json`.
+
+### 3. Instalar dependencias necesarias
+```
+npm install
+```
+
+### 4. Ejecutar importación
+```
+npm run seed
+```
+Este comando ejecuta:
+```
+ts-node scripts/importFirestore.ts --file data/seed-example.json --serviceAccount serviceAccount.json --merge
+```
+
+Parámetros útiles:
+
+### 5. Buenas prácticas
+
+### 6. Errores comunes
+| Problema | Causa probable | Solución |
+|----------|----------------|----------|
+| PERMISSION_DENIED | Reglas restringen escritura | Usar service account o ajustar reglas |
+| Project mismatch | projectId incorrecto | Verificar que la key corresponde al proyecto |
+| Not found serviceAccount.json | Ruta incorrecta | Moverlo a la raíz o ajustar parámetro |
+
+
+## Vista de detalle de servicio (Modal)
+
+La pantalla `ServiceDetail` ahora se presenta como un modal tipo bottom-sheet (presentation: modal) con:
+ - Cabecera con handle y botón Cerrar.
+ - Botón flotante (sticky) para confirmar la reserva.
+ - Dirección de destino colapsable: si ya existe una dirección (perfil o guardada localmente) se muestra en modo resumen con opción Editar.
+ - Usuarios no autenticados pueden guardar una dirección local (AsyncStorage) para reutilizarla después.
+ - Las reservas relacionadas se movieron a la pantalla `ServiceReservations` accesible mediante el enlace "Ver reservas relacionadas" dentro del modal.
+
+Esto reduce la sobrecarga visual y evita listas grandes dentro del modal principal.
+
+## Modo oscuro y preferencias de tema
+
+Se añadió un sistema de temas con las opciones:
+ - Claro
+ - Oscuro
+ - Sistema (se adapta dinámicamente a los cambios del SO)
+
+La preferencia se guarda en `AsyncStorage` como `themePreference` y el tema efectivo (light/dark) se recalcula automáticamente. Paleta extendida disponible: `accent`, `danger`, `overlay`, `elevation1`, `elevation2`, `highlight`, `tabBar`.
+
+En la pantalla `Profile` hay una sección "Apariencia" con un selector (segmentos) y un atajo para alternar rápido entre claro/oscuro.
+
+La barra de navegación inferior ahora:
+ - Tiene contenedor redondeado y sombra elevada.
+ - Oculta labels por defecto (usa íconos y un texto pequeño debajo).
+ - Resalta la pestaña activa con un fondo `highlight` y tinte `primary`.
+
+## Modal de reserva activa
+
+Se añadió la pantalla modal `ActiveReservationDetail` para mostrar la información de una reserva en curso:
+ - Estado con chip coloreado.
+ - Detalles del servicio (snapshot), participantes y ubicación.
+ - Progreso visual (timeline: pending → confirmed → in_progress → completed).
+ - Acciones contextuales: aceptar (proveedor), cancelar (cliente), editar nota/dirección (cliente en estados tempranos), abrir chat (cuando procede).
+Reemplaza el acceso previo que redirigía a `ServiceDetail` desde `ActiveServices`.

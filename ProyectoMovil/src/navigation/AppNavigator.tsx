@@ -9,13 +9,15 @@ import ProviderHomeMinimal from "../screens/ProviderHomeMinimal";
 import Login from "../screens/Login";
 import Profile from "../screens/Profile";
 import ServiceDetail from "../screens/ServiceDetail";
+// usar require dinámico para evitar error de tipos en entornos donde no se transpila aún
+const ServiceReservations = require('../screens/ServiceReservations').default;
 import AddService from "../screens/AddService";
 import { useAuth } from '../contexts/AuthContext';
 import { useEffect, useState } from 'react';
 import { getUserProfile } from '../services/firestoreService';
 import History from "../screens/History";
 // import Chat from "../screens/Chat";
-import { View, Text, Platform, ActivityIndicator, Image } from 'react-native';
+import { View, Text, Platform, ActivityIndicator, Image, TouchableOpacity } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import type { RouteProp } from '@react-navigation/native';
 
@@ -58,38 +60,74 @@ function MainTabs() {
 
     return (
         <Tab.Navigator
-            screenOptions={({ route }: { route: RouteProp<Record<string, object | undefined>, string> }) => ({
+            screenOptions={{
                 headerShown: false,
-                tabBarShowLabel: true,
-                tabBarStyle: {
-                    backgroundColor: colors.surface,
-                    borderTopLeftRadius: 18,
-                    borderTopRightRadius: 18,
-                    height: Platform.OS === 'ios' ? 90 : 70,
-                    paddingBottom: Platform.OS === 'ios' ? 20 : 10,
-                    position: 'absolute',
-                    left: 10,
-                    right: 10,
-                    bottom: 10,
-                    elevation: 5,
-                },
-                tabBarLabelStyle: { fontSize: 12 },
-                tabBarActiveTintColor: colors.primary,
-                tabBarInactiveTintColor: colors.muted,
-                tabBarIcon: ({ color, size }: { color: string; size: number }) => {
-                    // Usar imágenes remotas para asegurar que se vean sin depender de fuentes.
-                    const icons: Record<string, string> = {
-                        Chat: 'https://cdn-icons-png.flaticon.com/512/2462/2462719.png',
-                        Explore: 'https://cdn-icons-png.flaticon.com/512/1077/1077114.png',
-                        History: 'https://cdn-icons-png.flaticon.com/512/545/545682.png',
-                        Profile: 'https://cdn-icons-png.flaticon.com/512/747/747376.png',
-                    };
-                    const uri = icons[route.name] || icons.Explore;
-                    return (
-                        <Image source={{ uri }} style={{ width: size, height: size, tintColor: color }} />
-                    );
-                },
-            })}
+                tabBarShowLabel: false,
+            }}
+            tabBar={({ state, descriptors, navigation }: any) => {
+                return (
+                    <View style={{
+                        flexDirection: 'row',
+                        backgroundColor: colors.tabBar || colors.surface,
+                        borderRadius: 26,
+                        marginHorizontal: 16,
+                        paddingHorizontal: 10,
+                        paddingTop: 8,
+                        paddingBottom: Platform.OS === 'ios' ? 28 : 14,
+                        position: 'absolute',
+                        left: 0,
+                        right: 0,
+                        bottom: 10,
+                        shadowColor: '#000',
+                        shadowOpacity: 0.15,
+                        shadowRadius: 12,
+                        shadowOffset: { width: 0, height: 4 },
+                        elevation: 10,
+                    }}>
+                        {state.routes.map((route: any, index: number) => {
+                            const focused = state.index === index;
+                            const onPress = () => {
+                                const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+                                if (!focused && !event.defaultPrevented) navigation.navigate(route.name as never);
+                            };
+                            const onLongPress = () => navigation.emit({ type: 'tabLongPress', target: route.key });
+                            const icons: Record<string, string> = {
+                                Chat: 'https://cdn-icons-png.flaticon.com/512/2462/2462719.png',
+                                Explore: 'https://cdn-icons-png.flaticon.com/512/1077/1077114.png',
+                                History: 'https://cdn-icons-png.flaticon.com/512/545/545682.png',
+                                Profile: 'https://cdn-icons-png.flaticon.com/512/747/747376.png',
+                                ActiveServices: 'https://cdn-icons-png.flaticon.com/512/3707/3707225.png',
+                                CreateService: 'https://cdn-icons-png.flaticon.com/512/992/992651.png',
+                                MyServices: 'https://cdn-icons-png.flaticon.com/512/1828/1828911.png',
+                            };
+                            const uri = icons[route.name] || icons.Explore;
+                            return (
+                                <TouchableOpacity
+                                    key={route.key}
+                                    accessibilityRole="button"
+                                    accessibilityState={focused ? { selected: true } : {}}
+                                    accessibilityLabel={descriptors[route.key].options.tabBarAccessibilityLabel}
+                                    testID={descriptors[route.key].options.tabBarTestID}
+                                    onPress={onPress}
+                                    onLongPress={onLongPress}
+                                    style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
+                                >
+                                    <View style={{
+                                        padding: 10,
+                                        borderRadius: 18,
+                                        backgroundColor: focused ? colors.highlight : 'transparent'
+                                    }}>
+                                        <Image source={{ uri }} style={{ width: 26, height: 26, tintColor: focused ? colors.primary : colors.muted }} />
+                                    </View>
+                                    <Text style={{ fontSize: 11, marginTop: 2, color: focused ? colors.primary : colors.muted }}>
+                                        {descriptors[route.key].options.title || route.name}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </View>
+                );
+            }}
         >
             <Tab.Screen name="Chat" component={require('../screens/Chat').default} />
             <Tab.Screen name="Explore" component={ExploreComp} />
@@ -115,7 +153,9 @@ export default function AppNavigator({ isLoggedIn }: { isLoggedIn: boolean }) {
             {isLoggedIn ? (
                 <>
                     <Stack.Screen name="Main" component={MainTabs} />
-                        <Stack.Screen name="ServiceDetail" component={ServiceDetail} />
+                        <Stack.Screen name="ServiceDetail" component={ServiceDetail} options={{ presentation: 'modal', headerShown: false }} />
+                        <Stack.Screen name="ServiceReservations" component={ServiceReservations} options={{ title: 'Reservas del servicio' }} />
+                        <Stack.Screen name="ActiveReservationDetail" component={require('../screens/ActiveReservationDetail').default} options={{ presentation: 'modal', headerShown:false }} />
                         <Stack.Screen name="AddService" component={AddService} />
                         <Stack.Screen name="Chat" component={require('../screens/ChatRoom').default} />
                 </>

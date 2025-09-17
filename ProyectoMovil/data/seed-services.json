@@ -1,0 +1,59 @@
+{
+  "services": {
+    "painting_basic": {
+      "title": "Pintura Interior Básica",
+      "description": "Se pintan apartamentos y residenciales hasta 80m2 (incluye materiales base).",
+      "price": 2000,
+      "duration": 360,
+      "ownerId": "providerDemo123",
+      "ownerDisplayName": "Yesser Avelar",
+      "ownerPhone": "73983051",
+      "active": true,
+      "tags": ["Pintura", "arte", "motivación"]
+    },
+    "deep_clean_home": {
+      "title": "Limpieza Profunda Hogar",
+      "description": "Limpieza profunda de cocina, baños, ventanas y pisos. Hasta 120m2.",
+      "price": 55,
+      "duration": 180,
+      "ownerId": "providerDemo123",
+      "ownerDisplayName": "Proveedor Demo",
+      "ownerPhone": "+50370000000",
+      "active": true,
+      "tags": ["limpieza", "hogar", "profunda"]
+    },
+    "garden_express": {
+      "title": "Jardinería Express",
+      "description": "Corte de césped, poda ligera y recolección de desechos verdes (hasta 60m2).",
+      "price": 30,
+      "duration": 90,
+      "ownerId": "providerDemo123",
+      "ownerDisplayName": "Proveedor Demo",
+      "ownerPhone": "+50370000000",
+      "active": true,
+      "tags": ["jardinería", "verde", "césped"]
+    },
+    "ac_repair_check": {
+      "title": "Diagnóstico Aire Acondicionado",
+      "description": "Revisión técnica y limpieza básica de unidad residencial (split).",
+      "price": 25,
+      "duration": 60,
+      "ownerId": "providerDemo123",
+      "ownerDisplayName": "Proveedor Demo",
+      "ownerPhone": "+50370000000",
+      "active": true,
+      "tags": ["clima", "diagnóstico", "mantenimiento"]
+    },
+    "plumbing_emergency": {
+      "title": "Plomería Emergencias 24h",
+      "description": "Atención fugas y obstrucciones leves. No incluye repuestos.",
+      "price": 40,
+      "duration": 75,
+      "ownerId": "providerDemo123",
+      "ownerDisplayName": "Proveedor Demo",
+      "ownerPhone": "+50370000000",
+      "active": true,
+      "tags": ["plomería", "urgente", "fugas"]
+    }
+  }
+}

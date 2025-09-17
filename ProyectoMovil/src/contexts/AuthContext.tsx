@@ -53,7 +53,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const [user, setUser] = useState<User>(null);
     const [isAllowed, setIsAllowed] = useState<Boolean>(false);
     const [loading, setLoading] = useState<boolean>(true);
+    // Bandera para evitar múltiples actualizaciones en tiempo real
+    const updateLockRef = useRef(false);
     useEffect(() => {
+        let unsub: (() => void) | null = null;
         // read persisted remember flag into state on mount
         (async () => {
             try {
@@ -65,37 +68,41 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         })();
 
         const auth = getAuth();
-        const unsub = onAuthStateChanged(auth, async (u: FirebaseAuthTypes.User | null) => {
+        unsub = onAuthStateChanged(auth, async (u: FirebaseAuthTypes.User | null) => {
+            // Limitar la actualización en tiempo real usando la bandera
+            if (updateLockRef.current) return;
+            updateLockRef.current = true;
+            setTimeout(() => { updateLockRef.current = false; }, 500); // 500ms de bloqueo
+
             if (u) {
                 try {
                     const v = await AsyncStorage.getItem(REMEMBER_KEY);
                     const rememberedNow = v === '1';
-                    // if there's no persisted remember flag and this session wasn't marked temporary,
-                    // then we should not keep the user signed (this prevents persisting sessions across restarts)
                     if (!rememberedNow && !sessionTemporaryRef.current) {
                         try {
                             await signOut(auth);
                         } catch (e) {
                             console.warn('AuthProvider forced signOut failed', e);
                         }
-                        setUser(null);
-                        setIsAllowed(false);
+                        if (user !== null) setUser(null);
+                        if (isAllowed !== false) setIsAllowed(false);
                         setLoading(false);
                         return;
                     }
                 } catch (e) {
                     console.warn('AuthProvider checking remember flag failed', e);
                 }
-
-                setUser({ uid: u.uid, email: u.email ?? '' });
-                setIsAllowed(true);
+                if (!user || user.uid !== u.uid) setUser({ uid: u.uid, email: u.email ?? '' });
+                if (!isAllowed) setIsAllowed(true);
             } else {
-                setUser(null);
-                setIsAllowed(false);
+                if (user !== null) setUser(null);
+                if (isAllowed !== false) setIsAllowed(false);
             }
             setLoading(false);
         });
-        return () => unsub();
+        return () => {
+            if (unsub) unsub();
+        };
     }, []);
 
     // in-memory ref used to mark a login that should be temporary only for this run
@@ -128,12 +135,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                     console.warn('Keychain native module not available - skipping secure credential save');
                 }
             }
-            // Actualizar/crear perfil en users collection
+            // Actualizar/crear perfil en users collection solo si hay cambios relevantes
             try {
-                await updateUserProfile(u.uid, {
-                    email: u.email,
-                    displayName: (u as any).displayName || '',
-                });
+                const currentProfile = await getUserProfile(u.uid);
+                const newDisplayName = (u as any).displayName || '';
+                if (!currentProfile || currentProfile.email !== u.email || currentProfile.displayName !== newDisplayName) {
+                    await updateUserProfile(u.uid, {
+                        email: u.email,
+                        displayName: newDisplayName,
+                    });
+                }
             } catch (e) {
                 console.warn('update user doc error', e);
             }
@@ -243,6 +254,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const logout = React.useCallback(async () => {
         const auth = getAuth();
         try {
+            // Limitar la actualización en tiempo real usando la bandera
+            if (updateLockRef.current) return;
+            updateLockRef.current = true;
+            setTimeout(() => { updateLockRef.current = false; }, 500);
             // Attempt to refresh saved accounts so displayName changes are reflected before we sign out
             try { await refreshSavedAccountsDisplayNames(); } catch (e) { /* ignore */ }
             await signOut(auth);
@@ -251,12 +266,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             console.warn('AuthContext logout error', e);
         } finally {
             // ensure local state is cleared even if signOut failed locally
-            setUser(null);
-            setIsAllowed(false);
+            if (user !== null) setUser(null);
+            if (isAllowed !== false) setIsAllowed(false);
             // clear persisted remember flag on explicit logout
             try { await AsyncStorage.removeItem(REMEMBER_KEY); } catch (e) { /* ignore */ }
         }
-    }, [refreshSavedAccountsDisplayNames]);
+    }, [refreshSavedAccountsDisplayNames, user, isAllowed]);
 
     const loadSavedAccounts = React.useCallback(async () => {
         try {

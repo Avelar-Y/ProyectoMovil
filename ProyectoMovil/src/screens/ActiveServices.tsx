@@ -101,7 +101,7 @@ export default function ActiveServices({ navigation }: any) {
         </View>
         <Text style={{ color: colors.muted, marginTop: 8 }}>{activeReservation.serviceSnapshot?.title}</Text>
         <View style={{ flexDirection: 'row', marginTop: 12 }}>
-          <TouchableOpacity style={[styles.detailBtn]} onPress={() => navigation.navigate('ServiceDetail', { service: activeReservation.serviceSnapshot, reservationId: activeReservation.id })}>
+          <TouchableOpacity style={[styles.detailBtn]} onPress={() => navigation.navigate('ActiveReservationDetail', { reservation: activeReservation })}>
             <Text style={{ color: '#fff', fontWeight: '700' }}>Ver detalles</Text>
           </TouchableOpacity>
           {activeReservation.status === 'pending' && (

@@ -73,3 +73,7 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# Firebase service account (no subir credenciales)
+serviceAccount.json
+data/seed.json

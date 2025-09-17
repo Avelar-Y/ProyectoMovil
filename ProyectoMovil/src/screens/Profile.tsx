@@ -8,7 +8,7 @@ import { useRefresh } from '../contexts/RefreshContext';
 
 export default function Profile({ navigation }: any) {
     const { user, logout } = useAuth();
-    const { colors, themeName, toggle } = useTheme();
+    const { colors, themeName, preference, setPreference, toggle } = useTheme();
     const [loading, setLoading] = useState(true);
     const [name, setName] = useState('');
     const [phone, setPhone] = useState('');
@@ -145,16 +145,24 @@ export default function Profile({ navigation }: any) {
                 <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled"
                     refreshControl={<RefreshControl refreshing={refreshCtx.refreshing || loading} onRefresh={async () => await refreshCtx.triggerRefresh()} />}
                 >
-                <Image
-                    source={{ uri: avatarUrl || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }}
-                    style={styles.avatar}
-                />
-                <Text style={[styles.email, { color: colors.text }]}>{user?.email || 'Usuario'}</Text>
+                <View style={[styles.headerCard, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+                    <Image
+                        source={{ uri: avatarUrl || 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }}
+                        style={styles.avatar}
+                    />
+                    <View style={{ flex:1, marginLeft:16 }}>
+                        <Text style={[styles.email, { color: colors.text }]} numberOfLines={1}>{user?.email || 'Usuario'}</Text>
+                        <View style={[styles.rolePill, { backgroundColor: colors.highlight, borderColor: colors.border }]}>
+                            <Text style={{ color: colors.text, fontSize:12 }}>{role === 'provider' ? 'Proveedor' : 'Usuario'}</Text>
+                        </View>
+                    </View>
+                </View>
 
                 {loading ? (
                     <ActivityIndicator style={{ marginTop: 20 }} color={colors.primary} />
                 ) : (
-                    <View style={{ marginTop: 12, width: '100%', paddingHorizontal: 20 }}>
+                    <View style={{ marginTop: 12, width: '100%', paddingHorizontal: 0 }}>
+                        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>  
                         <Text style={{ color: colors.muted, marginBottom: 6 }}>Nombre</Text>
                         <TextInput editable={editingProfile} value={name} onChangeText={setName} placeholder='Nombre' placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.border }]} />
                         <Text style={{ color: colors.muted, marginTop: 8, marginBottom: 6 }}>Teléfono</Text>
@@ -184,8 +192,23 @@ export default function Profile({ navigation }: any) {
                             <CustomButton title="Historial" onPress={() => navigation.navigate('History')} />
                             <CustomButton title="Cerrar sesión" onPress={async () => { try { await logout(); } catch (e) { Alert.alert('Error', 'No se pudo cerrar sesión'); console.warn('logout failed', e); } }} variant="secondary" />
                         </View>
+                        </View>
 
-                        <View style={{ marginTop: 18 }}>
+                        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>Apariencia</Text>
+                            <View style={styles.segmentRow}>
+                                {(['light','dark','system'] as const).map(opt => (
+                                    <TouchableOpacity key={opt} onPress={() => setPreference(opt)} style={[styles.segmentItem, { backgroundColor: preference === opt ? colors.primary : 'transparent', borderColor: colors.border }]}> 
+                                        <Text style={{ color: preference === opt ? '#fff' : colors.text, fontSize:12, fontWeight:'600' }}>{opt === 'light' ? 'Claro' : opt === 'dark' ? 'Oscuro' : 'Sistema'}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                            <TouchableOpacity onPress={toggle} style={{ marginTop:8 }}>
+                                <Text style={{ color: colors.primary, fontSize:12 }}>Alternar rápido (Light/Dark)</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
                             <Text style={[styles.sectionTitle, { color: colors.text }]}>Ubicaciones guardadas</Text>
                             {addresses.length === 0 ? (
                                 <Text style={{ color: colors.muted, marginTop: 8 }}>No tienes ubicaciones guardadas.</Text>
@@ -225,7 +248,7 @@ export default function Profile({ navigation }: any) {
                                 )}
                             </View>
 
-                            <View style={{ marginTop: 18 }}>
+                            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
                                 <Text style={[styles.sectionTitle, { color: colors.text }]}>Últimas reservaciones</Text>
                                 {reservations.length === 0 ? (
                                     <Text style={{ color: colors.muted, marginTop: 8 }}>No tienes reservaciones aún.</Text>
@@ -254,6 +277,21 @@ const styles = StyleSheet.create({
     container: {
         alignItems: 'center',
         padding: 20,
+    },
+    card: {
+        width: '100%',
+        borderRadius: 16,
+        padding: 16,
+        marginTop: 18,
+        borderWidth: 1,
+    },
+    headerCard: {
+        width: '100%',
+        flexDirection: 'row',
+        padding: 16,
+        borderRadius: 20,
+        borderWidth: 1,
+        alignItems: 'center'
     },
     avatar: {
         width: 96,
@@ -284,4 +322,7 @@ const styles = StyleSheet.create({
     },
     sectionTitle: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
     choiceRow: { padding: 12, marginVertical: 6, borderRadius: 8, width: '100%' },
+    segmentRow: { flexDirection: 'row', marginTop: 4 },
+    segmentItem: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 12, marginRight: 8, borderWidth: 1 },
+    rolePill: { alignSelf:'flex-start', paddingHorizontal:10, paddingVertical:4, borderRadius:12, marginTop:8, borderWidth:1 }
 });

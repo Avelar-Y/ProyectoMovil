@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Image, TextInput, Alert, FlatList, ActivityIndicator, ScrollView, TouchableOpacity, Platform, Linking } from 'react-native';
+import { View, Text, StyleSheet, Image, TextInput, Alert, ActivityIndicator, ScrollView, TouchableOpacity, Platform } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../contexts/ThemeContext';
 import { useRefresh } from '../contexts/RefreshContext';
 import CustomButton from '../components/CustomButton';
 import { useAuth } from '../contexts/AuthContext';
 import { saveReservation, getReservationsForService, getUserProfile, updateUserProfile } from '../services/firestoreService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function ServiceDetail({ route, navigation }: any) {
     const { service } = route.params || { service: null };
@@ -22,6 +23,7 @@ export default function ServiceDetail({ route, navigation }: any) {
     const [selectedAddressIndex, setSelectedAddressIndex] = useState<number | null>(null);
     const [loadingReservations, setLoadingReservations] = useState(false);
     const [reservations, setReservations] = useState<any[]>([]);
+    const [addressCollapsed, setAddressCollapsed] = useState(true);
     const [profile, setProfile] = useState<any | null>(null);
     const [serviceOwner, setServiceOwner] = useState<any | null>(null);
     const { user } = useAuth();
@@ -35,7 +37,6 @@ export default function ServiceDetail({ route, navigation }: any) {
                 const idOrKey = service.id || service.key || service;
                 const res = await getReservationsForService(idOrKey);
                 if (mounted) setReservations(res || []);
-                // load service owner info if available
                 try {
                     if (service.ownerId) {
                         const so = await getUserProfile(service.ownerId);
@@ -44,12 +45,9 @@ export default function ServiceDetail({ route, navigation }: any) {
                         if (mounted) setServiceOwner({ phone: service.ownerPhone, displayName: service.ownerDisplayName });
                     }
                 } catch (e) { console.warn('Could not load service owner', e); }
-            } catch (err) {
-                console.warn('Could not load reservations for service', err);
-            } finally {
-                if (mounted) setLoadingReservations(false);
-            }
-        }
+            } catch (err) { console.warn('Could not load reservations for service', err); }
+            finally { if (mounted) setLoadingReservations(false); }
+        };
         load();
         // Prefill user profile if authenticated
         (async () => {
@@ -69,6 +67,7 @@ export default function ServiceDetail({ route, navigation }: any) {
                             setProvince(a.province || '');
                             setPostalCode(a.postalCode || '');
                             setCountry(a.country || '');
+                            setAddressCollapsed(true);
                         } else if (p.address) {
                             const a = p.address as any;
                             if (a.addressLine) setAddressLine(a.addressLine);
@@ -76,11 +75,27 @@ export default function ServiceDetail({ route, navigation }: any) {
                             if (a.province) setProvince(a.province);
                             if (a.postalCode) setPostalCode(a.postalCode);
                             if (a.country) setCountry(a.country);
+                            setAddressCollapsed(true);
                         }
                     }
                 }
             } catch (e) {
                 console.warn('prefill profile failed', e);
+            }
+            // cargar dirección local guardada si no hay perfil
+            if (!profile && !(user as any)?.uid) {
+                try {
+                    const raw = await AsyncStorage.getItem('@localAddress');
+                    if (raw) {
+                        const a = JSON.parse(raw);
+                        setAddressLine(a.addressLine||'');
+                        setCity(a.city||'');
+                        setProvince(a.province||'');
+                        setPostalCode(a.postalCode||'');
+                        setCountry(a.country||'');
+                        setAddressCollapsed(true);
+                    }
+                } catch {}
             }
         })();
         return () => { mounted = false };
@@ -202,7 +217,7 @@ export default function ServiceDetail({ route, navigation }: any) {
 
     if (!service) {
         return (
-            <View style={styles.container}>
+            <View style={{ flex:1, alignItems:'center', justifyContent:'center', padding:24 }}>
                 <Text style={styles.title}>Servicio no encontrado</Text>
             </View>
         );
@@ -211,12 +226,19 @@ export default function ServiceDetail({ route, navigation }: any) {
     const { colors } = useTheme();
 
     return (
-        <ScrollView contentContainerStyle={[styles.container, { backgroundColor: colors.background }] }>
-            <View style={[styles.card, { backgroundColor: colors.card }] }>
+    <View style={[styles.modalContainer, { backgroundColor: 'rgba(0,0,0,0.45)' }]}>
+            <View style={[styles.sheet, { backgroundColor: colors.card }]}>
+                <View style={styles.sheetHandle} />
+                <View style={styles.modalHeader}>
+                    <Text style={[styles.title, { color: colors.text, flex:1 }]} numberOfLines={1}>{service.title || service.key || 'Servicio'}</Text>
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.closeBtn}>
+                        <Text style={{ color: colors.primary, fontWeight: '700' }}>Cerrar</Text>
+                    </TouchableOpacity>
+                </View>
+                <ScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
                 <View style={styles.headerRow}>
                     <Image source={{ uri: service.icon || 'https://cdn-icons-png.flaticon.com/512/854/854878.png' }} style={styles.image} />
                     <View style={{ flex: 1, marginLeft: 12 }}>
-                        <Text style={[styles.title, { color: colors.text }]}>{service.title || service.key || 'Servicio'}</Text>
                         <Text style={{ color: colors.muted, marginTop: 6 }}>{service.key || service.id || '-'}</Text>
                     </View>
                 </View>
@@ -263,8 +285,7 @@ export default function ServiceDetail({ route, navigation }: any) {
                         ))}
                     </View>
                 )}
-
-                            <View style={{ marginTop: 12 }}>
+                <View style={{ marginTop: 12 }}>
                                 {/* Input de nombre eliminado: usaremos el displayName del perfil o el email al crear la reserva */}
                                 <TouchableOpacity onPress={() => setShowDatePicker(true)} style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border, justifyContent: 'center' }] }>
                                     <Text style={{ color: date ? colors.text : colors.muted }}>{date || 'Selecciona una fecha'}</Text>
@@ -289,6 +310,15 @@ export default function ServiceDetail({ route, navigation }: any) {
                                 <TextInput placeholder="Nota adicional" value={note} onChangeText={setNote} style={[styles.input, { height: 80, backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.text }]} multiline placeholderTextColor={colors.muted} />
 
                     <Text style={[styles.fieldLabel, { color: colors.muted, marginTop: 8 }]}>Dirección de destino</Text>
+                    {/* Summary collapsed block */}
+                    {addressCollapsed && (addressLine || city || province || country) ? (
+                        <TouchableOpacity onPress={() => setAddressCollapsed(false)} style={[styles.addressSummary, { backgroundColor: colors.inputBg, borderColor: colors.border }]}>
+                            <Text style={{ color: colors.text, fontWeight: '600' }} numberOfLines={1}>{addressLine || 'Dirección'}</Text>
+                            <Text style={{ color: colors.muted, fontSize: 12 }} numberOfLines={1}>{[city, province, country].filter(Boolean).join(', ')}</Text>
+                            <Text style={{ color: colors.primary, marginTop: 4 }}>Editar</Text>
+                        </TouchableOpacity>
+                    ) : (
+                        <>
                         {profile?.addresses && Array.isArray(profile.addresses) && profile.addresses.length > 0 ? (
                             <View>
                                 <Text style={{ color: colors.muted, marginBottom: 6 }}>Usar una dirección guardada</Text>
@@ -307,76 +337,57 @@ export default function ServiceDetail({ route, navigation }: any) {
                                 ))}
                             </View>
                         ) : null}
-
                         <TextInput placeholder="Calle, número, apto" value={addressLine} onChangeText={setAddressLine} style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.text }]} placeholderTextColor={colors.muted} />
                         <TextInput placeholder="Ciudad" value={city} onChangeText={setCity} style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.text }]} placeholderTextColor={colors.muted} />
                         <TextInput placeholder="Provincia / Estado" value={province} onChangeText={setProvince} style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.text }]} placeholderTextColor={colors.muted} />
                         <TextInput placeholder="Código postal" value={postalCode} onChangeText={setPostalCode} style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.text }]} placeholderTextColor={colors.muted} />
                         <TextInput placeholder="País" value={country} onChangeText={setCountry} style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border, color: colors.text }]} placeholderTextColor={colors.muted} />
-                </View>
-
-                <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-                    <View style={{ flex: 1 }}>
-                        <CustomButton title="Reservar" onPress={handleReserve} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                        <CustomButton title="Volver" onPress={() => navigation.goBack()} variant="tertiary" />
-                    </View>
-                </View>
-
-                    {user?.uid ? (
-                        <View style={{ marginTop: 12 }}>
-                            <CustomButton title="Guardar dirección en mi perfil" onPress={async () => {
-                                try {
-                                    const uid = (user as any).uid;
-                                    await updateUserProfile(uid, { address: { addressLine, city, province, postalCode, country } });
-                                    Alert.alert('Listo', 'Dirección guardada en tu perfil');
-                                } catch (e: any) {
-                                    Alert.alert('Error', e?.message || 'No se pudo guardar');
-                                }
-                            }} variant="secondary" />
-                        </View>
-                    ) : null}
-
-                <View style={{ width: '100%', marginTop: 18 }}>
-                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Reservas relacionadas</Text>
-                    {loadingReservations ? (
-                        <ActivityIndicator />
-                    ) : reservations.length === 0 ? (
-                        <Text style={{ color: colors.muted }}>No hay reservas para este servicio</Text>
-                    ) : (
-                        // Avoid nesting FlatList (VirtualizedList) inside a ScrollView.
-                        // Render a simple mapped list instead (good for small lists).
-                        <View>
-                            {reservations.map((item: any) => (
-                                <View key={item.id} style={[styles.reservationRow, { borderColor: colors.border }] }>
-                                    <Text style={{ fontWeight: '700', color: colors.text }}>{item.name}</Text>
-                                    <Text style={{ color: colors.muted }}>{item.date}</Text>
-                                    <Text style={{ color: colors.muted, fontSize: 12 }}>{item.userEmail}</Text>
-                                </View>
-                            ))}
-                        </View>
+                        <TouchableOpacity onPress={() => setAddressCollapsed(true)} style={{ alignSelf: 'flex-start', marginBottom: 8 }}>
+                            <Text style={{ color: colors.primary }}>Colapsar</Text>
+                        </TouchableOpacity>
+                        </>
                     )}
                 </View>
+                {user?.uid ? (
+                    <View style={{ marginTop: 12 }}>
+                        <CustomButton title="Guardar dirección en mi perfil" onPress={async () => {
+                            try {
+                                const uid = (user as any).uid;
+                                await updateUserProfile(uid, { address: { addressLine, city, province, postalCode, country } });
+                                Alert.alert('Listo', 'Dirección guardada en tu perfil');
+                            } catch (e: any) {
+                                Alert.alert('Error', e?.message || 'No se pudo guardar');
+                            }
+                        }} variant="secondary" />
+                    </View>
+                ) : (
+                    <View style={{ marginTop: 12 }}>
+                        <CustomButton title="Guardar dirección local" onPress={async () => {
+                            try {
+                                await AsyncStorage.setItem('@localAddress', JSON.stringify({ addressLine, city, province, postalCode, country }));
+                                Alert.alert('Listo', 'Dirección guardada localmente');
+                            } catch {}
+                        }} variant="secondary" />
+                    </View>
+                )}
+                <TouchableOpacity style={{ marginTop: 24, alignSelf: 'flex-start' }} onPress={() => navigation.navigate('ServiceReservations', { serviceId: service.id || service.key || service })}>
+                    <Text style={{ color: colors.primary }}>Ver reservas relacionadas {loadingReservations ? '...' : `(${reservations.length})`}</Text>
+                </TouchableOpacity>
+                </ScrollView>
+                <View style={styles.fabArea}>
+                    <CustomButton title="Reservar" onPress={handleReserve} />
+                </View>
             </View>
-        </ScrollView>
+        </View>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        padding: 20,
-        backgroundColor: '#f5f6fa'
-    },
-    card: {
-        borderRadius: 12,
-        padding: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 8,
-        elevation: 3,
-    },
+    modalContainer: { flex:1, justifyContent:'flex-end', backgroundColor:'rgba(0,0,0,0.4)' },
+    sheet: { maxHeight: '92%', borderTopLeftRadius:24, borderTopRightRadius:24, paddingHorizontal:20, paddingTop:8, paddingBottom:0 },
+    sheetHandle: { width:50, height:5, borderRadius:3, backgroundColor:'#ccc', alignSelf:'center', marginBottom:12 },
+    modalHeader: { flexDirection:'row', alignItems:'center', marginBottom:8 },
+    closeBtn: { paddingHorizontal:12, paddingVertical:6, borderRadius:16, backgroundColor:'rgba(0,0,0,0.04)' },
     headerRow: { flexDirection: 'row', alignItems: 'center' },
     metaRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
     tagsRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 10 },
@@ -407,6 +418,8 @@ const styles = StyleSheet.create({
         marginBottom: 8,
     },
     fieldLabel: { marginTop: 8, fontWeight: '700' },
-    sectionTitle: { fontWeight: '700', marginBottom: 8 }
+    sectionTitle: { fontWeight: '700', marginBottom: 8 },
+    addressSummary: { padding:12, borderRadius:10, borderWidth:1, marginBottom:8 },
+    fabArea: { position:'absolute', left:0, right:0, bottom:0, padding:16, borderTopWidth:StyleSheet.hairlineWidth, borderColor:'rgba(0,0,0,0.1)' }
 });
  
