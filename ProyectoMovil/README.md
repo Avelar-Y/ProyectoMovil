@@ -180,3 +180,70 @@ Se añadió la pantalla modal `ActiveReservationDetail` para mostrar la informac
  - Progreso visual (timeline: pending → confirmed → in_progress → completed).
  - Acciones contextuales: aceptar (proveedor), cancelar (cliente), editar nota/dirección (cliente en estados tempranos), abrir chat (cuando procede).
 Reemplaza el acceso previo que redirigía a `ServiceDetail` desde `ActiveServices`.
+
+## Motivo de cancelación, estado final y badges en historial
+
+Mejoras recientes para trazabilidad y claridad del ciclo de vida de las reservas:
+
+1. Motivo de cancelación (opcional):
+	- Al pulsar "Cancelar reserva" en el modal `ActiveReservationDetail` se despliega un pequeño formulario para introducir un motivo.
+	- Si se confirma, el campo `cancelReason` se guarda junto con la reserva.
+	- Se muestra en el historial sólo para reservas canceladas.
+
+2. Campo `finalState`:
+	- Nueva propiedad persistida en la colección `reservations` para estados terminales.
+	- Valores posibles: `completed` | `cancelled`.
+	- Se escribe al finalizar (`finishService` / `confirmCompletion`) o al cancelar (`cancelReservation` / cancelación transaccional).
+	- Permite distinguir una reserva que ya no debe volver a estados activos aunque `status` se sobrescriba accidentalmente.
+
+3. Cancelación transaccional (`cancelReservationAtomic`):
+	- Usa `runTransaction` para validar que la reserva no haya sido finalizada por otra acción concurrente.
+	- Verifica que el estado actual esté dentro del conjunto permitido (por defecto `['pending','confirmed']`).
+	- Evita condiciones de carrera entre aceptación/progreso y la cancelación del cliente.
+
+4. Badges de estado en `History`:
+	- Cada item muestra un chip coloreado según el estado (`pending`, `confirmed`, `in_progress`, `completed`, `cancelled`).
+	- Colores mapeados a la paleta del tema (`muted`, `accent`, `primary`, `danger`).
+	- Si la reserva está cancelada y existe `cancelReason`, se muestra debajo (máx. 3 líneas).
+
+### Resumen de cambios en funciones Firestore
+| Función | Cambio | Detalle |
+|--------|--------|---------|
+| `cancelReservation` | Añade `finalState: 'cancelled'` | Escritura directa (legacy) |
+| `cancelReservationAtomic` | NUEVA | Transacción con validación de estado y `cancelReason` opcional |
+| `finishService` | Añade `finalState: 'completed'` | Marca fin desde proveedor |
+| `confirmCompletion` | Añade `finalState: 'completed'` | Confirmación cliente; opcional pago |
+
+### Consideraciones futuras
+- Un índice compuesto podría optimizar filtros por `finalState` si se implementan vistas archivadas.
+- Se puede añadir métrica de tiempo total (`finishedAt - startedAt`) y causas comunes de cancelación para analítica.
+
+## Historial mejorado (agrupación, filtros, búsqueda)
+
+Se añadieron varias mejoras a la pantalla `History`:
+
+- Chips compactos reutilizando componente `Chip` para filtrar múltiples estados simultáneamente (multi-select, persistidos en `AsyncStorage` bajo clave `historyFilters`).
+- Búsqueda por texto (título de servicio, nombre o nota).
+- Agrupación por fecha usando `SectionList` (encabezados sticky).
+- Estadísticas rápidas: Activas, Completadas, Canceladas, Total.
+- Estilo atenuado para completadas/canceladas para priorizar activas.
+- Navegación contextual: estados activos → `ActiveReservationDetail`; terminales → `ServiceDetail` (o ficha histórica).
+
+### Componente Chip reutilizable
+Archivo: `src/components/Chip.tsx`
+
+Props principales:
+- `label`: texto.
+- `active`: estado visual activo.
+- `small`: variante más compacta (opcional).
+- `iconLeft`: permite ícono ReactNode.
+
+Usos:
+- `Home` (categorías de servicios)
+- `History` (filtros de estado)
+
+Ventajas:
+- Consistencia visual tema claro/oscuro.
+- Facilidad para extender (añadir contador, ícono de cierre, etc.).
+
+

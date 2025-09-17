@@ -48,6 +48,7 @@ export type Reservation = {
   paymentStatus?: 'unpaid' | 'pending' | 'paid' | 'failed' | 'refunded';
   paymentInfo?: Record<string, any> | null;
   status?: 'pending' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled';
+  finalState?: 'completed' | 'cancelled'; // estado terminal definitivo
   // provider / assignment fields
   providerId?: string;
   providerPhone?: string;
@@ -425,11 +426,37 @@ export const sendMessage = async (reservationId: string, message: { authorId?: s
 
 export const cancelReservation = async (reservationId: string, reason?: string) => {
   try {
-    const payload: any = { status: 'cancelled', updatedAt: serverTimestamp(), cancelledAt: serverTimestamp() };
+    const payload: any = { status: 'cancelled', finalState: 'cancelled', updatedAt: serverTimestamp(), cancelledAt: serverTimestamp() };
     if (reason) payload.cancelReason = reason;
     await updateDoc(doc(db, 'reservations', reservationId), payload);
   } catch (err) {
     console.error('cancelReservation error', err);
+    throw err;
+  }
+};
+
+// Versión transaccional que valida estado antes de cancelar (evita race conditions)
+export const cancelReservationAtomic = async (reservationId: string, reason?: string, allowed: string[] = ['pending','confirmed']) => {
+  try {
+    await runTransaction(db, async (tx) => {
+      const ref = doc(db, 'reservations', reservationId);
+      const snap = await tx.get(ref as any);
+      if (!snap.exists()) throw new Error('Reservation not found');
+      const data = snap.data() as any;
+      const current = data.status || 'pending';
+      if (data.finalState) throw new Error('Reservation already finalized');
+      if (!allowed.includes(current)) throw new Error('Estado no permite cancelación');
+      const update: any = {
+        status: 'cancelled',
+        finalState: 'cancelled',
+        updatedAt: serverTimestamp(),
+        cancelledAt: serverTimestamp(),
+      };
+      if (reason) update.cancelReason = reason;
+      tx.update(ref as any, update);
+    });
+  } catch (err) {
+    console.error('cancelReservationAtomic error', err);
     throw err;
   }
 };
@@ -549,7 +576,7 @@ export const finishService = async (reservationId: string, providerId: string) =
     if (!snap.exists()) throw new Error('Reservation not found');
     const data = snap.data() as any;
     if (data.providerId !== providerId) throw new Error('Not assigned provider');
-    await updateDoc(ref, { status: 'completed', finishedAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    await updateDoc(ref, { status: 'completed', finalState: 'completed', finishedAt: serverTimestamp(), updatedAt: serverTimestamp() });
     // notify client that service finished (client should confirm and pay)
     const clientId = data.userId || null;
     if (clientId) {
@@ -571,7 +598,7 @@ export const finishService = async (reservationId: string, providerId: string) =
 // Client confirms completion and optionally pays
 export const confirmCompletion = async (reservationId: string, paymentInfo?: any) => {
   try {
-    const payload: any = { status: 'completed', updatedAt: serverTimestamp() };
+    const payload: any = { status: 'completed', finalState: 'completed', updatedAt: serverTimestamp() };
     if (paymentInfo) {
       payload.paymentInfo = paymentInfo;
       payload.paymentStatus = 'paid';
@@ -633,6 +660,7 @@ const defaultExport = {
   listenMessages,
   sendMessage,
   cancelReservation,
+  cancelReservationAtomic,
   acceptReservation,
   updateReservation,
 };

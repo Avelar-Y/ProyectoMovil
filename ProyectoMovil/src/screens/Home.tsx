@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, FlatList, Modal, Pressable, ActivityIndicator, TextInput, RefreshControl } from 'react-native';
+import Chip from '../components/Chip';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useRefresh } from '../contexts/RefreshContext';
@@ -124,9 +125,7 @@ export default function Home({ navigation }: any) {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.chipsRow}
         renderItem={({ item }) => (
-          <TouchableOpacity onPress={() => onSelectCategory(item)} style={[styles.chip, { backgroundColor: query === item ? colors.primary : colors.card }]}> 
-            <Text style={{ color: query === item ? '#fff' : colors.text, fontSize: 12 }}>{item}</Text>
-          </TouchableOpacity>
+          <Chip label={item} active={query === item} onPress={() => onSelectCategory(item)} variant="sm" maxWidth={140} />
         )}
       />
 
@@ -176,7 +175,7 @@ const styles = StyleSheet.create({
   searchBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, borderWidth: 1, gap: 12 },
   searchInput: { flex: 1, fontSize: 14, padding: 0 },
   chipsRow: { paddingHorizontal: 16, paddingVertical: 8 },
-  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 10 },
+  chip: { },
   listContent: { paddingHorizontal: 16, paddingBottom: 40 },
   card: { flexDirection: 'row', padding: 12, borderRadius: 12, marginBottom: 12, gap: 12 },
   cardImg: { width: 54, height: 54, borderRadius: 10 },

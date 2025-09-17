@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, TextInput, Alert } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { listenReservation, updateReservation, cancelReservation, acceptReservation, getUserProfile } from '../services/firestoreService';
+import { listenReservation, updateReservation, cancelReservationAtomic, acceptReservation, getUserProfile } from '../services/firestoreService';
 
 interface Props { route: any; navigation: any; }
 
@@ -20,6 +20,9 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
   const [editAddress, setEditAddress] = useState('');
   const [profileRole, setProfileRole] = useState<'user' | 'provider' | null>(null);
   const isProvider = profileRole === 'provider';
+  // cancel reason UI state
+  const [showCancelUI, setShowCancelUI] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
 
   // load role
   useEffect(() => {
@@ -73,12 +76,8 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
 
   const handleCancel = async () => {
     if (!reservationId) return;
-    Alert.alert('Cancelar', '¿Quieres cancelar la reserva?', [
-      { text: 'No', style: 'cancel' },
-      { text: 'Sí', style: 'destructive', onPress: async () => {
-        try { await cancelReservation(reservationId); navigation.goBack(); } catch(e:any){ Alert.alert('Error', e?.message || 'No se pudo cancelar'); }
-      }}
-    ]);
+    // Mostrar panel interno para capturar motivo (opcional).
+    setShowCancelUI(true);
   };
 
   const handleAccept = async () => {
@@ -177,6 +176,38 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
               <TouchableOpacity onPress={handleCancel} style={[styles.inlineAction, { backgroundColor: colors.danger }]}>
                 <Text style={{ color: '#fff', fontWeight: '600' }}>Cancelar reserva</Text>
               </TouchableOpacity>
+            )}
+            {showCancelUI && (
+              <View style={[styles.section, { borderColor: colors.border, marginTop: 18 }]}> 
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>Motivo de cancelación</Text>
+                <Text style={{ color: colors.muted, fontSize:12, marginTop:6 }}>Opcional, pero ayuda a mejorar el servicio.</Text>
+                <TextInput
+                  placeholder="Motivo (opcional)"
+                  value={cancelReason}
+                  onChangeText={setCancelReason}
+                  multiline
+                  placeholderTextColor={colors.muted}
+                  style={[styles.input, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.border, height:90, textAlignVertical:'top' }]}
+                />
+                <View style={{ flexDirection:'row', gap:10, marginTop:4 }}>
+                  <TouchableOpacity onPress={() => { setShowCancelUI(false); setCancelReason(''); }} style={[styles.smallBtn, { backgroundColor: colors.muted }]}> 
+                    <Text style={styles.smallBtnText}>Volver</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={async () => {
+                      try {
+                        await cancelReservationAtomic(reservationId, cancelReason.trim() || undefined);
+                        navigation.goBack();
+                      } catch (e: any) {
+                        Alert.alert('Error', e?.message || 'No se pudo cancelar');
+                      }
+                    }}
+                    style={[styles.smallBtn, { backgroundColor: colors.danger }]}
+                  >
+                    <Text style={styles.smallBtnText}>Confirmar</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
             )}
           </ScrollView>
         )}
