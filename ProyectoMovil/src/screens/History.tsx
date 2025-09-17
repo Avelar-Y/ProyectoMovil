@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, SectionList, TouchableOpacity, ScrollView, TextInput } from 'react-native';
+import { View, Text, StyleSheet, SectionList, TouchableOpacity, TextInput } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 // firestore namespaced import removed; use centralized service helpers instead
 import { useFocusEffect } from '@react-navigation/native';
@@ -7,7 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { getReservationsForUser, getUserProfile, getReservationsByProvider } from '../services/firestoreService';
 import { useRefresh } from '../contexts/RefreshContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Chip from '../components/Chip';
+import CategoryTabs from '../components/CategoryTabs';
 
 
 export default function History({ navigation }: any) {
@@ -21,6 +21,7 @@ export default function History({ navigation }: any) {
     const [search, setSearch] = useState('');
 
     const allStatuses = ['pending','confirmed','in_progress','completed','cancelled'];
+    const labelMap: Record<string,string> = { pending: 'Pendiente', confirmed: 'Confirmada', in_progress: 'En curso', completed: 'Completada', cancelled: 'Cancelada' };
     const toggleStatus = (s: string) => {
         setSelectedStatuses(prev => {
             const next = prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s];
@@ -187,17 +188,24 @@ export default function History({ navigation }: any) {
                                     )}
                                 </View>
 
-                                {/* Filters row */}
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingVertical:2, paddingHorizontal:4 }} style={{ marginBottom:8 }}>
-                                                        {allStatuses.map(s => {
-                                                            const active = selectedStatuses.includes(s);
-                                                            const labelMap: any = { pending: 'Pendiente', confirmed: 'Confirmada', in_progress: 'En curso', completed: 'Completada', cancelled: 'Cancelada' };
-                                                            return <Chip key={s} label={labelMap[s] || s} active={active} onPress={() => toggleStatus(s)} variant="sm" maxWidth={150} />;
-                                                        })}
-                                                        {selectedStatuses.length > 0 && (
-                                                            <Chip label="Limpiar" active={false} onPress={clearFilters} variant="sm" />
-                                                        )}
-                                </ScrollView>
+                                {/* Filters tabs (multi-select) */}
+                                <CategoryTabs
+                                    categories={allStatuses.map(s => labelMap[s] || s)}
+                                    values={selectedStatuses.map(s => labelMap[s] || s)}
+                                    onToggle={(label) => {
+                                        // revert label to status key
+                                        const entry = Object.entries(labelMap).find(([k,v]) => v === label);
+                                        const statusKey = entry ? entry[0] : label; // fallback
+                                        toggleStatus(statusKey);
+                                    }}
+                                    scrollEnabled
+                                    uppercase={false}
+                                />
+                                {selectedStatuses.length > 0 && (
+                                    <TouchableOpacity onPress={clearFilters} style={{ alignSelf:'flex-end', marginTop:4, marginBottom:4 }}>
+                                        <Text style={{ color: colors.primary, fontSize:12, fontWeight:'600' }}>Limpiar filtros</Text>
+                                    </TouchableOpacity>
+                                )}
 
                                 {/* Stats */}
                                 <View style={styles.statsRow}>
@@ -286,7 +294,7 @@ export default function History({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, padding: 20, backgroundColor: '#f5f6fa' },
+    container: { flex: 1, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20, backgroundColor: '#f5f6fa' },
     title: { fontSize: 20, fontWeight: '700', marginBottom: 10 },
     item: { padding: 12, borderRadius: 12, marginBottom: 10, borderWidth:1 },
     itemTitle: { fontWeight: '700' },

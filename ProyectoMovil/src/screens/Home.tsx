@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, FlatList, Modal, Pressable, ActivityIndicator, TextInput, RefreshControl } from 'react-native';
-import Chip from '../components/Chip';
+import Chip from '../components/Chip'; // mantenido por si se usa en otra parte (puede quitarse si ya no se necesita)
+import CategoryTabs from '../components/CategoryTabs';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useRefresh } from '../contexts/RefreshContext';
@@ -117,34 +118,26 @@ export default function Home({ navigation }: any) {
         </View>
       </View>
 
-      {/* Categories chips */}
-      <FlatList
-        data={categories}
-        keyExtractor={c => c}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.chipsRow}
-        renderItem={({ item }) => (
-          <Chip label={item} active={query === item} onPress={() => onSelectCategory(item)} variant="sm" maxWidth={140} />
-        )}
-      />
+      {/* Categories tabs */}
+      <CategoryTabs categories={categories} value={query} onChange={onSelectCategory} allowDeselect />
 
-      {/* Services list */}
-      {filtered.length === 0 ? (
-        <View style={styles.emptyWrapper}>
-          <Text style={{ color: colors.muted, marginBottom: 8 }}>No hay servicios que coincidan.</Text>
-          <TouchableOpacity onPress={() => setQuery('')}><Text style={{ color: colors.primary }}>Limpiar búsqueda</Text></TouchableOpacity>
-        </View>
-      ) : (
+      {/* Services list estable */}
+      <View style={{ flex:1 }}>
         <FlatList
           data={filtered}
           keyExtractor={i => i.id}
           renderItem={renderService}
-          contentContainerStyle={styles.listContent}
+            contentContainerStyle={[styles.listContent, filtered.length === 0 && { flexGrow:1, justifyContent:'center' }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
           keyboardShouldPersistTaps="handled"
+          ListEmptyComponent={
+            <View style={styles.emptyWrapper}> 
+              <Text style={{ color: colors.muted, marginBottom: 8 }}>No hay servicios que coincidan.</Text>
+              <TouchableOpacity onPress={() => setQuery('')}><Text style={{ color: colors.primary }}>Limpiar búsqueda</Text></TouchableOpacity>
+            </View>
+          }
         />
-      )}
+      </View>
 
       {/* Profile modal */}
       <Modal visible={showProfile} animationType="fade" transparent onRequestClose={() => setShowProfile(false)}>
@@ -171,12 +164,14 @@ const styles = StyleSheet.create({
   welcome: { fontSize: 12, fontWeight: '500', letterSpacing: 0.5 },
   appName: { fontSize: 20, fontWeight: '700', maxWidth: 180 },
   avatar: { width: 40, height: 40, borderRadius: 20 },
-  searchBarWrapper: { paddingHorizontal: 20, paddingBottom: 6 },
-  searchBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, borderWidth: 1, gap: 12 },
+  // Reducimos padding inferior para pegar los chips al buscador
+  // Quitamos paddingBottom para que los chips "toquen" visualmente el borde inferior
+  searchBarWrapper: { paddingHorizontal: 20, paddingBottom: 0 },
+  // Reducimos paddingVertical de 10 -> 8 para compactar altura
+  searchBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12, borderWidth: 1, gap: 12 },
   searchInput: { flex: 1, fontSize: 14, padding: 0 },
-  chipsRow: { paddingHorizontal: 16, paddingVertical: 8 },
-  chip: { },
-  listContent: { paddingHorizontal: 16, paddingBottom: 40 },
+  // Unificamos paddingHorizontal con header/buscador (20) y añadimos paddingTop mínimo para separar de tabs
+  listContent: { paddingHorizontal: 20, paddingBottom: 40, paddingTop: 4 },
   card: { flexDirection: 'row', padding: 12, borderRadius: 12, marginBottom: 12, gap: 12 },
   cardImg: { width: 54, height: 54, borderRadius: 10 },
   cardTitle: { fontSize: 15, fontWeight: '600' },
