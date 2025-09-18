@@ -6,6 +6,7 @@ import { useRefresh } from '../contexts/RefreshContext';
 import CustomButton from '../components/CustomButton';
 import { useAuth } from '../contexts/AuthContext';
 import { saveReservation, getReservationsForService, getUserProfile, updateUserProfile, getOrCreateThread, appendReservationEvent } from '../services/firestoreService';
+import { geocodeAddress } from '../services/geocodingService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function ServiceDetail({ route, navigation }: any) {
@@ -173,6 +174,15 @@ export default function ServiceDetail({ route, navigation }: any) {
                 }
             } catch {}
 
+            // Intentar geocodificar la dirección (se usa tanto si proviene de addresses guardadas como si fue escrita)
+            let geoLat: number | undefined; let geoLng: number | undefined; let formattedAddress: string | undefined;
+            try {
+                const geo = await geocodeAddress(addressLine, city, province, country);
+                if (geo) { geoLat = geo.lat; geoLng = geo.lng; formattedAddress = geo.formattedAddress; }
+            } catch (e:any) {
+                console.warn('Geocoding falló, se continúa sin lat/lng', e?.message);
+            }
+
             const reservationData: any = {
                 userEmail: user?.email ?? 'unknown',
                 userId: (user as any)?.uid,
@@ -186,17 +196,23 @@ export default function ServiceDetail({ route, navigation }: any) {
                 date,
                 note,
                 address: {
-                    addressLine: addressLine || undefined,
+                    addressLine: formattedAddress || addressLine || undefined,
                     city: city || undefined,
                     province: province || undefined,
                     postalCode: postalCode || undefined,
                     country: country || undefined,
+                    lat: geoLat,
+                    lng: geoLng,
                 },
                 amount,
                 currency,
                 paymentStatus: 'unpaid',
                 status: 'pending',
             };
+
+            if (geoLat && geoLng) {
+                reservationData.clientLocation = { lat: geoLat, lng: geoLng, updatedAt: new Date() };
+            }
 
             const id = await saveReservation(reservationData);
             // Crear/obtener thread conversacional único cliente <-> proveedor y añadir evento reserva
