@@ -122,6 +122,11 @@ export default function ServiceDetail({ route, navigation }: any) {
     }, [serviceDetailHandler]);
 
     const handleReserve = async () => {
+        // Bloqueo inmediato si servicio no activo
+        if (!service?.active) {
+            Alert.alert('No disponible', 'Este servicio está inactivo y no se puede reservar.');
+            return;
+        }
         if (!date) {
             Alert.alert('Error', 'Por favor completa la fecha');
             return;
@@ -373,7 +378,7 @@ export default function ServiceDetail({ route, navigation }: any) {
                 </TouchableOpacity>
                 </ScrollView>
                 <View style={styles.fabArea}>
-                    <CustomButton title="Reservar" onPress={handleReserve} />
+                    <CustomButton title={service.active ? "Reservar" : "Inactivo"} onPress={handleReserve} disabled={!service.active} />
                 </View>
             </View>
         </View>
