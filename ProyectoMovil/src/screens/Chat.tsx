@@ -3,89 +3,69 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator }
 import { useTheme } from '../contexts/ThemeContext';
 import { useRefresh } from '../contexts/RefreshContext';
 import { useAuth } from '../contexts/AuthContext';
-// removed direct firestore import; using service helpers instead
-import { getReservationsForUser } from '../services/firestoreService';
 import { useFocusEffect } from '@react-navigation/native';
+import { listThreadsForUser, Thread } from '../services/firestoreService';
+
+// Nueva versión: muestra threads unificados (1 hilo por par de usuarios) estilo WhatsApp.
+// Cada item muestra el nombre del otro participante y el último mensaje o evento.
 
 export default function Chat({ navigation }: any) {
     const { colors } = useTheme();
     const { user } = useAuth();
-    const [conversations, setConversations] = useState<any[]>([]);
+    const [threads, setThreads] = useState<Thread[]>([]);
     const [loading, setLoading] = useState(true);
 
-    const loadConversations = async () => {
+    const loadThreads = async () => {
         setLoading(true);
         try {
             const uid = (user as any)?.uid;
             if (!uid) {
-                setConversations([]);
+                setThreads([]);
                 setLoading(false);
                 return;
             }
-
-            // Combine reservations where user is client or provider (todas las relevantes para chat)
-            const svc = await import('../services/firestoreService');
-            const userReservations = await svc.getReservationsForUser((user as any).email || '');
-            // Pendientes disponibles para proveedor
-            const providerPending = await svc.getPendingReservationsForProvider(uid).catch(() => []);
-            // Activas (confirmadas / en progreso) y completadas recientes del proveedor
-            let providerActive: any[] = [];
-            try { providerActive = await svc.getReservationsByProvider(uid); } catch { providerActive = []; }
-            // Filtramos completadas a las últimas 30 (si hay muchas) para no inflar la lista
-            const completed = providerActive.filter(r => r.status === 'completed').sort((a:any,b:any)=>(b.createdAtClient||0)-(a.createdAtClient||0)).slice(0,30);
-            const activeNotCompleted = providerActive.filter(r => r.status !== 'completed');
-            const providerAll = [...providerPending, ...activeNotCompleted, ...completed];
-            const combined = [...(userReservations || []), ...providerAll];
-            const map: Record<string, any> = {};
-            for (const r of combined) map[r.id || ''] = r;
-            const list = Object.values(map) as any[];
-
-            // For each reservation fetch the last message (one-time, paginated)
-            const conversationsWithLast = await Promise.all(list.map(async (r) => {
-                try {
-                    const page = await (await import('../services/firestoreService')).loadMessagesPage(r.id, 1);
-                    const last = page.messages.length ? page.messages[page.messages.length - 1] : null;
-                    const counterpartName = r.providerId === uid ? (r.name || r.userEmail) : (r.providerDisplayName || r.name || r.userEmail);
-                    return { reservationId: r.id, name: counterpartName || 'Contacto', lastMessage: last, status: r.status };
-                } catch (e) {
-                    const counterpartName = r.providerId === uid ? (r.name || r.userEmail) : (r.providerDisplayName || r.name || r.userEmail);
-                    return { reservationId: r.id, name: counterpartName || 'Contacto', lastMessage: null, status: r.status };
-                }
-            }));
-
-            // sort by last message time or createdAtClient
-            conversationsWithLast.sort((a: any, b: any) => {
-                const ta = (a.lastMessage && a.lastMessage.createdAtClient) || 0;
-                const tb = (b.lastMessage && b.lastMessage.createdAtClient) || 0;
-                return tb - ta;
-            });
-
-            setConversations(conversationsWithLast);
+            const list = await listThreadsForUser(uid);
+            setThreads(list);
         } catch (e) {
-            console.warn('loadConversations error', e);
-            setConversations([]);
+            console.warn('loadThreads error', e);
+            setThreads([]);
         } finally {
             setLoading(false);
         }
     };
 
-    // load on focus (one-time) instead of realtime listeners
-    useFocusEffect(
-        useCallback(() => {
-            loadConversations();
-            // no realtime listeners: avoid continuous updates and extra Firestore calls
-            return () => {};
-        }, [user])
-    );
+    useFocusEffect(useCallback(() => { loadThreads(); return () => {}; }, [user]));
 
-    // register global refresh
+    // Registrar en refresh global
     const refreshCtx = useRefresh();
-    const refreshHandler = useCallback(async () => { await loadConversations(); }, [user]);
+    const refreshHandler = useCallback(async () => { await loadThreads(); }, [user]);
     React.useEffect(() => {
         const id = 'Chat';
         refreshCtx.register(id, refreshHandler);
         return () => refreshCtx.unregister(id);
     }, [refreshHandler]);
+
+    const renderItem = ({ item }: { item: Thread }) => {
+        const uid = (user as any)?.uid;
+        const counterpartId = (item.participants || []).find(p => p !== uid) || 'desconocido';
+        const info = item.participantInfo?.[counterpartId];
+        const name = info?.displayName || counterpartId.slice(0, 10) || 'Contacto';
+        const last = item.lastMessage;
+        let preview = 'Sin mensajes';
+        if (last) {
+            if (last.type === 'reservation_event') preview = last.text || 'Nueva reserva';
+            else preview = last.text || 'Mensaje';
+        }
+        return (
+            <TouchableOpacity
+                style={[styles.row, { backgroundColor: colors.surface }]}
+                onPress={() => navigation.navigate('ChatRoom', { threadId: item.id, lastReservationId: (last as any)?.reservationId })}
+            >
+                <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>{name}</Text>
+                <Text style={[styles.last, { color: colors.muted }]} numberOfLines={2}>{preview}</Text>
+            </TouchableOpacity>
+        );
+    };
 
     if (loading) return <View style={[styles.container, { backgroundColor: colors.background }]}><ActivityIndicator /></View>;
 
@@ -93,17 +73,10 @@ export default function Chat({ navigation }: any) {
         <View style={[styles.container, { backgroundColor: colors.background }]}> 
             <Text style={[styles.title, { color: colors.text }]}>Chats</Text>
             <FlatList
-                data={conversations}
-                keyExtractor={(i) => i.reservationId}
-                renderItem={({ item }) => (
-                    <TouchableOpacity
-                        style={[styles.row, { backgroundColor: colors.surface }]}
-                        onPress={() => navigation.navigate('ChatRoom', { reservationId: item.reservationId })}
-                    >
-                        <Text style={[styles.name, { color: colors.text }]}>{item.name}</Text>
-                        <Text style={[styles.last, { color: colors.muted }]}>{item.lastMessage?.text || item.status || 'Sin mensajes'}</Text>
-                    </TouchableOpacity>
-                )}
+                data={threads}
+                keyExtractor={(i) => i.id || Math.random().toString()}
+                renderItem={renderItem}
+                ListEmptyComponent={<Text style={{ color: colors.muted, marginTop: 30, textAlign: 'center' }}>Aún no tienes conversaciones</Text>}
             />
         </View>
     );

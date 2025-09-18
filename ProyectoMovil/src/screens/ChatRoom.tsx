@@ -1,12 +1,16 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, Image, StyleSheet, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
-import { listenMessages, sendMessage, listenReservation } from '../services/firestoreService';
+import { listenMessages, sendMessage, listenReservation, listenThreadMessages, sendThreadMessage, getOrCreateThread } from '../services/firestoreService';
 import { useAuth } from '../contexts/AuthContext';
 import { useRefresh } from '../contexts/RefreshContext';
 
+// ChatRoom ahora soporta:
+// - threadId (nuevo modelo unificado)
+// - reservationId (legacy) -> se crea/obtiene thread y se redirige internamente
+
 export default function ChatRoom({ route, navigation }: any) {
-  const { reservationId } = route.params || {};
+  const { reservationId, threadId: routeThreadId, lastReservationId } = route.params || {};
   const { colors } = useTheme();
   const { user } = useAuth();
   const [messages, setMessages] = useState<any[]>([]);
@@ -14,55 +18,85 @@ export default function ChatRoom({ route, navigation }: any) {
   const [sending, setSending] = useState(false);
   const listRef = useRef<any>(null);
   const [reservation, setReservation] = useState<any | null>(null);
+  const [threadId, setThreadId] = useState<string | null>(routeThreadId || null);
+  const [mode, setMode] = useState<'thread' | 'legacy'>((routeThreadId ? 'thread' : 'legacy'));
+  const [counterpart, setCounterpart] = useState<any>(null);
 
+  // 1. Si llega solo reservationId (legacy), escuchamos esa reserva para extraer participantes y crear thread.
   useEffect(() => {
-    if (!reservationId) return;
-    const unsub = listenMessages(reservationId, (msgs) => {
-      setMessages(msgs || []);
-      // scroll to bottom
-      setTimeout(() => listRef.current?.scrollToEnd?.({ animated: true }), 100);
+    if (threadId || !reservationId) return; // ya tenemos thread o no hay reserva
+    const unsub = listenReservation(reservationId, async (r) => {
+      setReservation(r);
+      if (!r) return;
+      // Determinar uids participantes
+      const uid = (user as any)?.uid;
+      const otherUid = r.providerId && r.providerId !== uid ? r.providerId : r.userId && r.userId !== uid ? r.userId : null;
+      if (!uid || !otherUid) return;
+      try {
+        const createdId = await getOrCreateThread(uid, otherUid, {});
+        setThreadId(createdId);
+        setMode('thread');
+      } catch (e) {
+        console.warn('create thread from legacy reservation failed', e);
+      }
     });
     return () => unsub && unsub();
-  }, [reservationId]);
+  }, [reservationId, threadId]);
 
+  // 2. Escuchar mensajes según modo
   useEffect(() => {
-    if (!reservationId) return;
-    const unsub = listenReservation(reservationId, (r) => setReservation(r));
-    return () => unsub && unsub();
-  }, [reservationId]);
+    if (mode === 'thread') {
+      if (!threadId) return;
+      const unsub = listenThreadMessages(threadId, (msgs) => {
+        setMessages(msgs || []);
+        setTimeout(() => listRef.current?.scrollToEnd?.({ animated: true }), 100);
+      });
+      return () => unsub && unsub();
+    } else {
+      if (!reservationId) return;
+      const unsub = listenMessages(reservationId, (msgs) => {
+        setMessages(msgs || []);
+        setTimeout(() => listRef.current?.scrollToEnd?.({ animated: true }), 100);
+      });
+      return () => unsub && unsub();
+    }
+  }, [mode, threadId, reservationId]);
 
-  // Register refresh handler to re-load messages and reservation
+  // 3. Escuchar reserva (para header) también si ya estamos en thread pero venía lastReservationId
+  useEffect(() => {
+    const rid = reservationId || lastReservationId;
+    if (!rid) return;
+    const unsub = listenReservation(rid, (r) => setReservation(r));
+    return () => unsub && unsub();
+  }, [reservationId, lastReservationId]);
+
+  // 4. Refresh handler: recarga mensajes (solo legacy usa paginado actual; thread ya es realtime completo)
   const refreshCtx = useRefresh();
   const chatRoomRefreshHandler = React.useCallback(async () => {
-    if (!reservationId) return;
     try {
-      const page = await (await import('../services/firestoreService')).loadMessagesPage(reservationId, 50);
-      setMessages(page.messages || []);
+      if (mode === 'legacy' && reservationId) {
+        const page = await (await import('../services/firestoreService')).loadMessagesPage(reservationId, 50);
+        setMessages(page.messages || []);
+      }
+      // En thread no hacemos nada (ya realtime)
     } catch (e) { console.warn('ChatRoom refresh failed', e); }
-  }, [reservationId]);
+  }, [mode, reservationId]);
 
   React.useEffect(() => {
-    if (!reservationId) return;
-    const id = `ChatRoom-${reservationId}`;
+    const id = `ChatRoom-${threadId || reservationId || 'unknown'}`;
     refreshCtx.register(id, chatRoomRefreshHandler);
     return () => refreshCtx.unregister(id);
-  }, [chatRoomRefreshHandler]);
-
-  const getStatusLabel = (r: any) => {
-    if (!r) return '';
-    if (r.rejectedBy) return 'Rechazado';
-    if (r.finishedAt) return 'Finalizado';
-    if (r.startedAt) return 'En curso';
-    if (r.assignedAt) return 'En camino';
-    if (r.providerId) return 'Asignado';
-    return 'Pendiente';
-  };
+  }, [chatRoomRefreshHandler, threadId, reservationId]);
 
   const handleSend = async () => {
-    if (!text || !reservationId) return;
+    if (!text) return;
     setSending(true);
     try {
-      await sendMessage(reservationId, { authorId: (user as any)?.uid, text });
+      if (mode === 'thread' && threadId) {
+        await sendThreadMessage(threadId, { authorId: (user as any)?.uid, text });
+      } else if (reservationId) {
+        await sendMessage(reservationId, { authorId: (user as any)?.uid, text });
+      }
       setText('');
     } catch (e) {
       console.warn('send message error', e);
@@ -71,7 +105,20 @@ export default function ChatRoom({ route, navigation }: any) {
     }
   };
 
+  const isReservationEvent = (m: any) => m.type === 'reservation_event';
+
   const renderItem = ({ item }: any) => {
+    if (isReservationEvent(item)) {
+      return (
+        <View style={[styles.msgRowCenter]}>
+          <View style={[styles.eventBubble, { backgroundColor: colors.card }] }>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>{item.text || 'Evento de reserva'}</Text>
+            {item.snapshot?.title ? <Text style={{ color: colors.text, fontWeight: '600', marginTop: 4 }}>{item.snapshot.title}</Text> : null}
+            <Text style={{ fontSize: 10, color: colors.muted, marginTop: 4 }}>{new Date(item.createdAtClient || Date.now()).toLocaleString()}</Text>
+          </View>
+        </View>
+      );
+    }
     const isMe = item.authorId === (user as any)?.uid;
     return (
       <View style={[styles.msgRow, isMe ? styles.msgRowRight : styles.msgRowLeft]}>
@@ -83,14 +130,19 @@ export default function ChatRoom({ route, navigation }: any) {
     );
   };
 
+  const headerTitle = () => {
+    if (mode === 'legacy') return reservation?.providerDisplayName || reservation?.name || 'Contacto';
+    // En threads, aún podemos usar info de la reserva si existe, si no placeholder
+    return reservation?.providerDisplayName || reservation?.name || 'Chat';
+  };
+
   return (
     <KeyboardAvoidingView style={[styles.container, { backgroundColor: colors.background }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
-      {/* Header with avatar and status */}
       <View style={[styles.header, { backgroundColor: colors.card }]}>
         <Image source={{ uri: reservation?.providerAvatar || reservation?.userAvatar || 'https://cdn-icons-png.flaticon.com/512/149/149071.png' }} style={styles.headerAvatar} />
         <View style={{ marginLeft: 12 }}>
-          <Text style={{ fontWeight: '700', color: colors.text }}>{reservation?.providerDisplayName || reservation?.name || 'Contacto'}</Text>
-          <Text style={{ color: colors.muted }}>{getStatusLabel(reservation)}</Text>
+          <Text style={{ fontWeight: '700', color: colors.text }}>{headerTitle()}</Text>
+          {mode === 'legacy' && <Text style={{ color: colors.muted }}>{reservation?.status || ''}</Text>}
         </View>
       </View>
 
@@ -119,7 +171,9 @@ const styles = StyleSheet.create({
   msgRow: { marginBottom: 8 },
   msgRowLeft: { alignItems: 'flex-start' },
   msgRowRight: { alignItems: 'flex-end' },
+  msgRowCenter: { alignItems: 'center', marginBottom: 12 },
   bubble: { padding: 10, borderRadius: 12, maxWidth: '85%' },
+  eventBubble: { padding: 10, borderRadius: 12, maxWidth: '85%', opacity: 0.9 },
   composer: { flexDirection: 'row', padding: 8, alignItems: 'center' },
   input: { flex: 1, backgroundColor: '#fff', padding: 10, borderRadius: 8, marginRight: 8 },
   sendBtn: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }

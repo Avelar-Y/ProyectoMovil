@@ -21,6 +21,135 @@ import type { FirebaseFirestoreTypes } from '@react-native-firebase/firestore';
 
 const db = getFirestore();
 
+// ===================== THREADS (Conversaciones unificadas cliente <-> proveedor) =====================
+// Un thread representa un único canal entre dos usuarios (participants: [uidA, uidB])
+// Los mensajes se guardan en threads/{threadId}/messages
+// Tipos de mensaje: 'text' | 'reservation_event'
+
+export type Thread = {
+  id?: string;
+  participants: string[]; // exactly 2, sorted
+  participantInfo?: Record<string, { displayName?: string; avatarUrl?: string; phone?: string }>; // metadata ligera
+  lastMessage?: { text?: string; type?: string; createdAtClient?: number };
+  lastActivityAt?: FirebaseFirestoreTypes.Timestamp | null;
+  createdAt?: FirebaseFirestoreTypes.Timestamp | null;
+};
+
+export type ThreadMessage = {
+  id?: string;
+  type: 'text' | 'reservation_event';
+  authorId?: string; // para text
+  text?: string; // para text o resumen
+  reservationId?: string; // para reservation_event
+  snapshot?: any; // snapshot de la reserva (title, price, status)
+  dateLabel?: string; // YYYY-MM-DD para mostrar separador
+  createdAt?: FirebaseFirestoreTypes.Timestamp | null;
+  createdAtClient?: number;
+};
+
+const threadIdFor = (a: string, b: string) => {
+  const arr = [a, b].sort();
+  return `${arr[0]}__${arr[1]}`; // simple determinístico
+};
+
+export const getOrCreateThread = async (userA: string, userB: string, participantInfo?: Thread['participantInfo']) => {
+  if (!userA || !userB || userA === userB) throw new Error('Participantes inválidos para thread');
+  const id = threadIdFor(userA, userB);
+  const ref = doc(db, 'threads', id);
+  return runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref as any);
+    if (snap.exists()) {
+      // Optionally actualizar participantInfo incremental
+      if (participantInfo && Object.keys(participantInfo).length > 0) {
+        tx.set(ref as any, { participantInfo, updatedAt: serverTimestamp() }, { merge: true });
+      }
+      return id;
+    }
+    const data: Thread = {
+      participants: [userA, userB].sort(),
+      participantInfo: participantInfo || {},
+      createdAt: serverTimestamp() as any,
+      lastActivityAt: serverTimestamp() as any,
+      lastMessage: { text: 'Conversación iniciada', type: 'system', createdAtClient: Date.now() }
+    } as any;
+    tx.set(ref as any, data);
+    return id;
+  });
+};
+
+export const sendThreadMessage = async (threadId: string, payload: { authorId: string; text: string }) => {
+  if (!threadId) throw new Error('threadId requerido');
+  const messagesCol = collection(db, 'threads', threadId, 'messages');
+  const msg: ThreadMessage = {
+    type: 'text',
+    authorId: payload.authorId,
+    text: payload.text,
+    createdAt: serverTimestamp() as any,
+    createdAtClient: Date.now(),
+  };
+  await addDoc(messagesCol, msg as any);
+  await updateDoc(doc(db, 'threads', threadId), {
+    lastMessage: { text: payload.text, type: 'text', createdAtClient: msg.createdAtClient },
+    lastActivityAt: serverTimestamp(),
+  });
+};
+
+export const appendReservationEvent = async (threadId: string, data: { reservationId: string; snapshot?: any; status?: string }) => {
+  try {
+    if (!threadId) return;
+    const messagesCol = collection(db, 'threads', threadId, 'messages');
+    const today = new Date();
+    const dateLabel = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+    const text = `Nueva reserva (${data.snapshot?.title || data.reservationId})`;
+    const msg: ThreadMessage = {
+      type: 'reservation_event',
+      reservationId: data.reservationId,
+      snapshot: data.snapshot || {},
+      text,
+      dateLabel,
+      createdAt: serverTimestamp() as any,
+      createdAtClient: Date.now(),
+    };
+    await addDoc(messagesCol, msg as any);
+    await updateDoc(doc(db, 'threads', threadId), {
+      lastMessage: { text, type: 'reservation_event', createdAtClient: msg.createdAtClient },
+      lastActivityAt: serverTimestamp(),
+    });
+  } catch (e) {
+    console.warn('appendReservationEvent error', e);
+  }
+};
+
+export const listThreadsForUser = async (uid: string): Promise<Thread[]> => {
+  try {
+    if (!uid) return [];
+    // query threads where array-contains participants contains uid
+    const q = query(collection(db, 'threads'), where('participants', 'array-contains', uid));
+    const snap = await getDocs(q);
+  const list: Thread[] = snap.docs.map((d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as any) }));
+    // Sort by lastActivityAt / fallback lastMessage.createdAtClient
+    list.sort((a: any, b: any) => {
+      const ta = a.lastMessage?.createdAtClient || 0;
+      const tb = b.lastMessage?.createdAtClient || 0;
+      return tb - ta;
+    });
+    return list;
+  } catch (e) {
+    console.warn('listThreadsForUser error', e);
+    return [];
+  }
+};
+
+export const listenThreadMessages = (threadId: string, onChange: (msgs: ThreadMessage[]) => void) => {
+  if (!threadId) return () => {};
+  const ref = query(collection(db, 'threads', threadId, 'messages'), orderBy('createdAtClient', 'asc'));
+  const unsub = onSnapshot(ref as any, snap => {
+    const msgs = snap.docs.map((d: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({ id: d.id, ...(d.data() as any) })) as ThreadMessage[];
+    onChange(msgs);
+  }, err => console.warn('listenThreadMessages error', err));
+  return unsub;
+};
+
 export type Reservation = {
   id?: string;
   userEmail: string;
@@ -689,6 +818,12 @@ const defaultExport = {
   cancelReservationAtomic,
   acceptReservation,
   updateReservation,
+  // threads
+  getOrCreateThread,
+  sendThreadMessage,
+  appendReservationEvent,
+  listThreadsForUser,
+  listenThreadMessages,
 };
 
 export default defaultExport;

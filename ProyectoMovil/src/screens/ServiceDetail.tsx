@@ -5,7 +5,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useRefresh } from '../contexts/RefreshContext';
 import CustomButton from '../components/CustomButton';
 import { useAuth } from '../contexts/AuthContext';
-import { saveReservation, getReservationsForService, getUserProfile, updateUserProfile } from '../services/firestoreService';
+import { saveReservation, getReservationsForService, getUserProfile, updateUserProfile, getOrCreateThread, appendReservationEvent } from '../services/firestoreService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function ServiceDetail({ route, navigation }: any) {
@@ -199,6 +199,18 @@ export default function ServiceDetail({ route, navigation }: any) {
             };
 
             const id = await saveReservation(reservationData);
+            // Crear/obtener thread conversacional único cliente <-> proveedor y añadir evento reserva
+            try {
+                const clientId = (user as any)?.uid;
+                const providerId = reservationData.providerId;
+                if (clientId && providerId) {
+                    const threadId = await getOrCreateThread(clientId, providerId, {
+                        [clientId]: { displayName: reservationData.name },
+                        [providerId]: { displayName: reservationData.providerDisplayName }
+                    });
+                    await appendReservationEvent(threadId, { reservationId: id, snapshot: reservationData.serviceSnapshot, status: 'pending' });
+                }
+            } catch (e) { console.warn('No se pudo anexar evento de reserva al thread', e); }
             // Auto-save address in profile if this is the first time (profile exists but had no address)
             try {
                 const uidInner = (user as any)?.uid;
