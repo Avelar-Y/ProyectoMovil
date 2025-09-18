@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Image, Switch, Alert, TextInput, ActivityIndicator, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, RefreshControl } from 'react-native';
-import { saveReservation, getUserProfile, updateUserProfile, getReservationsForUser } from '../services/firestoreService';
+import { saveReservation, getUserProfile, updateUserProfile, getReservationsForUser, setAllServicesActiveForProvider } from '../services/firestoreService';
 import CustomButton from '../components/CustomButton';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -216,6 +216,8 @@ export default function Profile({ navigation }: any) {
                                     <CustomButton title="Salir del modo proveedor" variant='secondary' onPress={async () => {
                                         try {
                                             if (!user?.uid) return;
+                                            // Desactivar todos los servicios del proveedor al salir
+                                            try { await setAllServicesActiveForProvider(user.uid, false); } catch (e) { console.warn('No se pudieron desactivar todos los servicios', e); }
                                             await updateUserProfile(user.uid, { role: 'user' });
                                             setRole('user');
                                             Alert.alert('Modo proveedor', 'Has salido del modo proveedor. Puedes volver a activarlo cuando quieras.');

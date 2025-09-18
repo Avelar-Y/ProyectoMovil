@@ -223,6 +223,30 @@ export const getServicesForProvider = async (providerId: string): Promise<Servic
   }
 };
 
+// Activar o desactivar un servicio individual
+export const setServiceActive = async (serviceId: string, active: boolean) => {
+  try {
+    await updateDoc(doc(db, 'services', serviceId), { active, updatedAt: serverTimestamp() });
+  } catch (err) {
+    console.error('setServiceActive error', err);
+    throw err;
+  }
+};
+
+// Desactivar (o activar) todos los servicios de un proveedor (batch simple secuencial)
+export const setAllServicesActiveForProvider = async (providerId: string, active: boolean) => {
+  try {
+    const services = await getServicesForProvider(providerId);
+    for (const s of services) {
+      if (!s.id) continue;
+      try { await updateDoc(doc(db, 'services', s.id), { active, updatedAt: serverTimestamp() }); } catch (e) { console.warn('batch service update failed', s.id, e); }
+    }
+  } catch (err) {
+    console.error('setAllServicesActiveForProvider error', err);
+    throw err;
+  }
+};
+
 export const getReservationsForService = async (serviceIdOrKey: string) => {
   try {
     const snap = await getDocs(query(collection(db, 'reservations'), where('service', '==', serviceIdOrKey), orderBy('createdAtClient', 'desc')));
@@ -649,6 +673,8 @@ const defaultExport = {
   saveService,
   getServices,
   getServicesForProvider,
+  setServiceActive,
+  setAllServicesActiveForProvider,
   getActiveReservationForUser,
   getPendingReservationsForProvider,
   getActiveReservationsForProvider,

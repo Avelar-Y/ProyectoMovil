@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, Alert, ActivityIndicator, ScrollView } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { getServicesForProvider, saveService, getReservationsByProvider, updateReservationStatus, finishService, cancelReservation } from '../services/firestoreService';
+import { getServicesForProvider, saveService, getReservationsByProvider, updateReservationStatus, finishService, cancelReservation, setServiceActive } from '../services/firestoreService';
 
 interface ProviderService { id?: string; title: string; price?: number; description?: string; }
 interface ProviderReservation { id?: string; status?: string; serviceSnapshot?: any; service?: string; userEmail?: string; note?: string; }
@@ -75,12 +75,24 @@ export default function ProviderDashboard() {
     }
   };
 
-  const renderService = ({ item }: { item: ProviderService }) => (
-    <View style={[styles.card, { backgroundColor: colors.card }]}> 
-      <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{item.title}</Text>
-      {item.price!=null && <Text style={{ color: colors.primary, fontSize:12, marginTop:4 }}>${item.price}</Text>}
-    </View>
-  );
+  const renderService = ({ item }: { item: ProviderService & { active?: boolean } }) => {
+    const active = (item as any).active !== false; // default true
+    return (
+      <View style={[styles.card, { backgroundColor: colors.card, opacity: active ? 1 : 0.55 }]}> 
+        <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{item.title}</Text>
+        {item.price!=null && <Text style={{ color: colors.primary, fontSize:12, marginTop:4 }}>${item.price}</Text>}
+        <TouchableOpacity onPress={async () => {
+          try {
+            if (!item.id) return;
+            await setServiceActive(item.id, !active);
+            load();
+          } catch (e:any) { Alert.alert('Error', e?.message || 'No se pudo actualizar'); }
+        }} style={{ marginTop:8, alignSelf:'flex-start', paddingHorizontal:10, paddingVertical:6, borderRadius:8, backgroundColor: active ? colors.danger : colors.primary }}>
+          <Text style={{ color:'#fff', fontSize:11, fontWeight:'600' }}>{active ? 'Desactivar' : 'Activar'}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
 
   const renderReservation = ({ item }: { item: ProviderReservation }) => {
     const status = item.status || 'pending';
