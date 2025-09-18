@@ -155,20 +155,18 @@ export default function ServiceDetail({ route, navigation }: any) {
             const amount = service?.price ?? undefined;
             const currency = 'USD';
 
-            // Prevent providers (non 'user' roles) from reserving
-            try {
-                if (uid) {
-                    const currentProfile = await getUserProfile(uid);
-                    if (currentProfile && currentProfile.role && currentProfile.role !== 'user') {
-                        Alert.alert('Acceso denegado', 'Las cuentas de proveedor no pueden reservar servicios.');
-                        return;
-                    }
-                }
-            } catch (e) {
-                console.warn('Could not verify current user role', e);
-            }
+            // Permitir que proveedores reserven servicios de otros, el bloqueo se maneja sólo si es su propio servicio (ya implementado arriba).
 
             const computedName = (profile && profile.displayName) ? profile.displayName : (user?.email ?? 'Cliente');
+
+            // Bloqueo de auto-reserva: si el usuario autenticado es el dueño del servicio
+            try {
+                const uidCurrent = (user as any)?.uid;
+                if (uidCurrent && (service.ownerId === uidCurrent || serviceOwner?.uid === uidCurrent)) {
+                    Alert.alert('No permitido', 'No puedes reservar tu propio servicio.');
+                    return;
+                }
+            } catch {}
 
             const reservationData: any = {
                 userEmail: user?.email ?? 'unknown',

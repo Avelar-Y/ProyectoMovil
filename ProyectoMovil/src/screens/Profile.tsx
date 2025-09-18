@@ -18,6 +18,7 @@ export default function Profile({ navigation }: any) {
     const [avatarUrl, setAvatarUrl] = useState('');
     const [role, setRole] = useState<'user' | 'provider'>('user');
     const [reservations, setReservations] = useState<any[]>([]);
+    const [providerTermsAcceptedAt, setProviderTermsAcceptedAt] = useState<string | null>(null);
     const [addresses, setAddresses] = useState<any[]>([]);
     const [editingAddrIndex, setEditingAddrIndex] = useState<number | null>(null);
     const [addrLabel, setAddrLabel] = useState('');
@@ -40,6 +41,7 @@ export default function Profile({ navigation }: any) {
                     setPhone(profile.phone || '');
                     setAvatarUrl(profile.avatarUrl || '');
                     setRole(profile.role === 'provider' ? 'provider' : 'user');
+                    setProviderTermsAcceptedAt(profile.providerTermsAcceptedAt || null);
                     // support legacy single address or new addresses array
                     if (profile.addresses && Array.isArray(profile.addresses)) {
                         setAddresses(profile.addresses || []);
@@ -70,6 +72,7 @@ export default function Profile({ navigation }: any) {
             setPhone(profile?.phone || '');
             setAvatarUrl(profile?.avatarUrl || '');
             setRole(profile?.role === 'provider' ? 'provider' : 'user');
+            setProviderTermsAcceptedAt(profile?.providerTermsAcceptedAt || null);
             if (profile?.addresses && Array.isArray(profile.addresses)) setAddresses(profile.addresses || []);
             else if (profile?.address) setAddresses([profile.address]);
             const res = await getReservationsForUser(user.email || user.uid);
@@ -171,11 +174,7 @@ export default function Profile({ navigation }: any) {
                             <>
                                 <Text style={{ color: colors.muted, marginTop: 8, marginBottom: 6 }}>Avatar URL</Text>
                                 <TextInput value={avatarUrl} onChangeText={setAvatarUrl} placeholder='https://...' placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.border }]} />
-                                <Text style={{ color: colors.muted, marginTop: 8, marginBottom: 6 }}>Tipo de cuenta</Text>
-                                <View style={{ flexDirection: 'row', marginBottom: 8 }}>
-                                    <TouchableOpacity onPress={() => setRole('user')} style={{ marginRight: 12 }}><Text style={{ color: role === 'user' ? colors.primary : colors.muted }}>Usuario</Text></TouchableOpacity>
-                                    <TouchableOpacity onPress={() => setRole('provider')}><Text style={{ color: role === 'provider' ? colors.primary : colors.muted }}>Proveedor</Text></TouchableOpacity>
-                                </View>
+                                {/* Edición de rol eliminada: ahora la activación de proveedor se hace mediante sección dedicada */}
                             </>
                         )}
                         {/* Dirección removida: ahora se usan ubicaciones guardadas en 'Ubicaciones guardadas' */}
@@ -206,6 +205,43 @@ export default function Profile({ navigation }: any) {
                             <TouchableOpacity onPress={toggle} style={{ marginTop:8 }}>
                                 <Text style={{ color: colors.primary, fontSize:12 }}>Alternar rápido (Light/Dark)</Text>
                             </TouchableOpacity>
+                        </View>
+
+                        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>Modo proveedor</Text>
+                            {role === 'provider' ? (
+                                <>
+                                    <Text style={{ color: colors.muted, fontSize:12, marginBottom:12 }}>Tu cuenta está en modo proveedor. Puedes gestionar tus servicios y reservas desde el panel.</Text>
+                                    <CustomButton title="Ir al panel" onPress={() => navigation.navigate('Main', { screen: 'Provider' })} />
+                                    <CustomButton title="Salir del modo proveedor" variant='secondary' onPress={async () => {
+                                        try {
+                                            if (!user?.uid) return;
+                                            await updateUserProfile(user.uid, { role: 'user' });
+                                            setRole('user');
+                                            Alert.alert('Modo proveedor', 'Has salido del modo proveedor. Puedes volver a activarlo cuando quieras.');
+                                        } catch (e:any) {
+                                            Alert.alert('Error', e?.message || 'No se pudo actualizar');
+                                        }
+                                    }} />
+                                </>
+                            ) : providerTermsAcceptedAt ? (
+                                <>
+                                    <Text style={{ color: colors.muted, fontSize:12, marginBottom:12 }}>Ya aceptaste los términos previamente. Puedes reactivar el modo proveedor directamente.</Text>
+                                    <CustomButton title="Reactivar modo proveedor" onPress={async () => {
+                                        try {
+                                            if (!user?.uid) return;
+                                            await updateUserProfile(user.uid, { role: 'provider' });
+                                            setRole('provider');
+                                            Alert.alert('Modo proveedor', 'Modo proveedor reactivado');
+                                        } catch (e:any) { Alert.alert('Error', e?.message || 'No se pudo activar'); }
+                                    }} variant='primary' />
+                                </>
+                            ) : (
+                                <>
+                                    <Text style={{ color: colors.muted, fontSize:12, marginBottom:12 }}>Activa el modo proveedor para crear servicios y administrar reservas. Primero deberás aceptar los términos.</Text>
+                                    <CustomButton title="Convertirme en proveedor" onPress={() => navigation.navigate('ProviderTerms')} variant='primary' />
+                                </>
+                            )}
                         </View>
 
                         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
