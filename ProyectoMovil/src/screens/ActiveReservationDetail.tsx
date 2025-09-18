@@ -163,7 +163,7 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
               </TouchableOpacity>
             )}
             {canChat && (
-              <TouchableOpacity onPress={() => navigation.navigate('Chat', { reservationId })} style={[styles.inlineAction, { backgroundColor: colors.primary }]}>
+              <TouchableOpacity onPress={() => navigation.navigate('ChatRoom', { reservationId })} style={[styles.inlineAction, { backgroundColor: colors.primary }]}>
                 <Text style={{ color: '#fff', fontWeight: '600' }}>Abrir chat</Text>
               </TouchableOpacity>
             )}
