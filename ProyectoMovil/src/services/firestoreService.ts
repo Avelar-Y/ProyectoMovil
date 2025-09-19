@@ -18,6 +18,7 @@ import {
   onSnapshot,
 } from '@react-native-firebase/firestore';
 import type { FirebaseFirestoreTypes } from '@react-native-firebase/firestore';
+import { geocodeAddressHybrid, computeAddressHash } from './geocodingService';
 
 const db = getFirestore();
 
@@ -182,6 +183,12 @@ export type Reservation = {
   providerId?: string;
   providerPhone?: string;
   providerDisplayName?: string;
+  // Ubicaciones y tracking
+  providerLocation?: { lat: number; lng: number; updatedAt?: any } | null;
+  clientLocation?: { lat: number; lng: number; updatedAt?: any } | null;
+  // Información de ruta dinámica (texto humano devuelto por Directions API)
+  routeDistanceText?: string;
+  routeDurationText?: string;
   rejectedBy?: string[];
   assignedAt?: FirebaseFirestoreTypes.Timestamp | null;
   startedAt?: FirebaseFirestoreTypes.Timestamp | null;
@@ -525,6 +532,24 @@ export const listenReservation = (reservationId: string, onChange: (data: Reserv
   return unsub;
 };
 
+// Escucha únicamente cambios de providerLocation (y updatedAt opcional) para reducir re-renders pesados.
+// Retorna unsubscribe y llama al callback con { lat, lng, updatedAt } o null si se elimina.
+export const listenProviderLocation = (reservationId: string, onLoc: (loc: { lat: number; lng: number; updatedAt?: any } | null) => void) => {
+  if (!reservationId) return () => {};
+  const ref = doc(db, 'reservations', reservationId);
+  const unsub = onSnapshot(ref, snap => {
+    if (!snap.exists()) { onLoc(null); return; }
+    const data: any = snap.data();
+    const loc = data?.providerLocation;
+    if (loc && typeof loc.lat === 'number' && typeof loc.lng === 'number') {
+      onLoc(loc);
+    } else {
+      onLoc(null);
+    }
+  }, err => console.warn('listenProviderLocation error', err));
+  return unsub;
+};
+
 export const listenMessages = (reservationId: string, onMessage: (messages: any[]) => void) => {
   const ref = query(collection(db, 'reservations', reservationId, 'messages'), orderBy('createdAtClient', 'asc'));
   const unsub = onSnapshot(ref as any, snap => {
@@ -619,21 +644,6 @@ export const acceptReservation = async (reservationId: string) => {
     await updateDoc(doc(db, 'reservations', reservationId), { status: 'in_progress', updatedAt: serverTimestamp() });
   } catch (err) {
     console.error('acceptReservation error', err);
-    throw err;
-  }
-};
-
-export const updateReservation = async (reservationId: string, data: Record<string, any>) => {
-  try {
-    // sanitize undefined fields
-    const cleaned: any = {};
-    for (const k of Object.keys(data)) {
-      if (data[k] !== undefined) cleaned[k] = data[k];
-    }
-    cleaned.updatedAt = serverTimestamp();
-    await setDoc(doc(db, 'reservations', reservationId), cleaned, { merge: true });
-  } catch (err) {
-    console.error('updateReservation error', err);
     throw err;
   }
 };
@@ -749,11 +759,15 @@ export const finishService = async (reservationId: string, providerId: string) =
 };
 
 // Client confirms completion and optionally pays
-export const confirmCompletion = async (reservationId: string, paymentInfo?: any) => {
+export const confirmCompletion = async (reservationId: string, options?: { paymentInfo?: any; paymentMethod?: 'card' | 'cash'; breakdown?: any; markPaid?: boolean }) => {
   try {
     const payload: any = { status: 'completed', finalState: 'completed', updatedAt: serverTimestamp() };
-    if (paymentInfo) {
-      payload.paymentInfo = paymentInfo;
+    if (options?.paymentInfo) payload.paymentInfo = options.paymentInfo;
+    if (options?.paymentMethod) payload.paymentMethod = options.paymentMethod;
+    if (options?.breakdown) payload.paymentBreakdown = options.breakdown;
+    if (options?.paymentMethod === 'cash') {
+      payload.paymentStatus = options.markPaid ? 'paid' : 'pending';
+    } else if (options?.paymentMethod === 'card') {
       payload.paymentStatus = 'paid';
     }
     await updateDoc(doc(db, 'reservations', reservationId), payload);
@@ -796,6 +810,18 @@ export const getReservationsByProvider = async (providerId: string) : Promise<Re
   }
 };
 
+export const updateReservation = async (reservationId: string, updates: Partial<Reservation>) => {
+  try {
+    await updateDoc(doc(db, 'reservations', reservationId), {
+      ...updates,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (err) {
+    console.error('updateReservation error', err);
+    throw err;
+  }
+};
+
 const defaultExport = {
   saveReservation,
   getReservationsForUser,
@@ -812,18 +838,20 @@ const defaultExport = {
   startService,
   finishService,
   listenReservation,
+  listenProviderLocation,
   listenMessages,
   sendMessage,
   cancelReservation,
   cancelReservationAtomic,
   acceptReservation,
-  updateReservation,
   // threads
   getOrCreateThread,
   sendThreadMessage,
+  updateReservation,
   appendReservationEvent,
   listThreadsForUser,
   listenThreadMessages,
 };
 
 export default defaultExport;
+

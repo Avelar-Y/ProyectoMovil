@@ -84,6 +84,13 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        // Placeholder para la API key de Google Maps. Se inyecta desde:
+        // 1. Variable de entorno (GOOGLE_MAPS_API_KEY)
+        // 2. gradle.properties (GOOGLE_MAPS_API_KEY=...)
+        // 3. Fallback "CHANGEME" (no funcional)
+        manifestPlaceholders = [
+            GOOGLE_MAPS_API_KEY: System.getenv("GOOGLE_MAPS_API_KEY") ?: (project.hasProperty("GOOGLE_MAPS_API_KEY") ? project.property("GOOGLE_MAPS_API_KEY") : "CHANGEME")
+        ]
     }
     signingConfigs {
         debug {
@@ -111,6 +118,9 @@ apply plugin: 'com.google.gms.google-services'
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+    implementation 'com.google.android.gms:play-services-location:21.0.1'
+    implementation 'com.google.firebase:firebase-messaging:23.1.2'
+    implementation 'com.google.firebase:firebase-analytics:21.3.0'
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

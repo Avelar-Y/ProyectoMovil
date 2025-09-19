@@ -1,13 +1,15 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, Alert, ActivityIndicator, ScrollView } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { getServicesForProvider, saveService, getReservationsByProvider, updateReservationStatus, finishService, cancelReservation, setServiceActive } from '../services/firestoreService';
+import { getServicesForProvider, saveService, getReservationsByProvider, updateReservationStatus, finishService, cancelReservation, setServiceActive, updateReservation } from '../services/firestoreService';
 
 interface ProviderService { id?: string; title: string; price?: number; description?: string; }
 interface ProviderReservation { id?: string; status?: string; serviceSnapshot?: any; service?: string; userEmail?: string; note?: string; }
 
 export default function ProviderDashboard() {
+  const navigation = useNavigation<any>();
   const { colors } = useTheme();
   const { user } = useAuth();
   const [services, setServices] = useState<ProviderService[]>([]);
@@ -63,9 +65,22 @@ export default function ProviderDashboard() {
     } finally { setSavingService(false); }
   };
 
-  const updateReservation = async (id: string, action: 'accept'|'start'|'finish'|'cancel') => {
+  // Acciones sobre la reserva desde el panel proveedor. IMPORTANTE:
+  // Necesitamos guardar providerId cuando el proveedor "Acepta" para que la pantalla ActiveReservationDetail
+  // pueda iniciar el tracking (condición: reservation.providerId === user.uid).
+  const updateReservationAction = async (id: string, action: 'accept'|'start'|'finish'|'cancel') => {
     try {
-      if (action==='accept') await updateReservationStatus(id,'confirmed');
+      if (action==='accept') {
+        await updateReservationStatus(id,'confirmed');
+        try {
+          // Asignar providerId y metadatos básicos si aún no existen.
+          const uid = (user as any).uid;
+          await updateReservation(id, {
+            providerId: uid,
+            providerDisplayName: (user as any)?.displayName || (user as any)?.email || 'Proveedor',
+          });
+        } catch(e){ console.warn('Asignación providerId falló', e); }
+      }
       else if (action==='start') await updateReservationStatus(id,'in_progress');
       else if (action==='finish') await finishService(id, (user as any).uid);
       else if (action==='cancel') await cancelReservation(id,'Proveedor canceló');
@@ -98,10 +113,10 @@ export default function ProviderDashboard() {
     const status = item.status || 'pending';
     const title = item.serviceSnapshot?.title || item.service;
     const actions: { label:string; act: any; show:boolean }[] = [
-      { label:'Aceptar', act:() => updateReservation(item.id!, 'accept'), show: status==='pending' },
-      { label:'Iniciar', act:() => updateReservation(item.id!, 'start'), show: status==='confirmed' },
-      { label:'Finalizar', act:() => updateReservation(item.id!, 'finish'), show: status==='in_progress' },
-      { label:'Cancelar', act:() => updateReservation(item.id!, 'cancel'), show: ['pending','confirmed'].includes(status) }
+      { label:'Aceptar', act:() => updateReservationAction(item.id!, 'accept'), show: status==='pending' },
+      { label:'Iniciar', act:() => updateReservationAction(item.id!, 'start'), show: status==='confirmed' },
+      { label:'Finalizar', act:() => updateReservationAction(item.id!, 'finish'), show: status==='in_progress' },
+      { label:'Cancelar', act:() => updateReservationAction(item.id!, 'cancel'), show: ['pending','confirmed'].includes(status) }
     ];
     return (
       <View style={[styles.card, { backgroundColor: colors.card }]}> 
@@ -140,6 +155,14 @@ export default function ProviderDashboard() {
           <FlatList data={services} keyExtractor={s=>s.id!} renderItem={renderService} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom:16 }} />
 
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Reservas activas</Text>
+          {reservations.some(r=>['confirmed','in_progress'].includes(r.status||'')) && (
+            <TouchableOpacity onPress={() => {
+              const active = reservations.find(r=>['confirmed','in_progress'].includes(r.status||''));
+              if (active?.id) navigation.navigate('ProviderLiveRoute', { reservationId: active.id });
+            }} style={{ alignSelf:'flex-start', backgroundColor: colors.primary, paddingHorizontal:14, paddingVertical:8, borderRadius:10, marginBottom:8 }}>
+              <Text style={{ color:'#fff', fontSize:12, fontWeight:'600' }}>Ver ruta en vivo</Text>
+            </TouchableOpacity>
+          )}
           {reservations.length===0 && <Text style={{ color: colors.muted, fontSize:12 }}>No hay reservas pendientes o en progreso.</Text>}
           {reservations.map(r => <View key={r.id}>{renderReservation({ item: r })}</View>)}
         </ScrollView>

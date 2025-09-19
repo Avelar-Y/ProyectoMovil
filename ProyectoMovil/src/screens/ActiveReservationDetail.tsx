@@ -3,10 +3,14 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { listenReservation, updateReservation, cancelReservationAtomic, acceptReservation, getUserProfile } from '../services/firestoreService';
+import { listenReservation, updateReservation, cancelReservationAtomic, acceptReservation, getUserProfile, confirmCompletion } from '../services/firestoreService';
+import { geocodeAddressHybrid, computeAddressHash } from '../services/geocodingService';
 import { fetchRoute } from '../services/directionsService';
-import { startProviderLocationUpdates, stopProviderLocationUpdates, isTrackingActive } from '../services/locationTracking';
+import { GOOGLE_MAPS_API_KEY } from '@env';
+import { startProviderLocationUpdates, stopProviderLocationUpdates, isTrackingActive, hasLocationCapability } from '../services/locationTracking';
 import { requestLocationPermission } from '../services/permissions';
+import PaymentModal from '../components/PaymentModal';
+import { listPaymentMethods } from '../services/payments/paymentService';
 
 interface Props { route: any; navigation: any; }
 
@@ -32,43 +36,90 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
   const mapRef = useRef<MapView | null>(null);
   const [sharingLocation, setSharingLocation] = useState(false);
   const [trackingError, setTrackingError] = useState<string | null>(null);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [cards, setCards] = useState<any[]>([]);
+  const [finalizing, setFinalizing] = useState(false);
 
   // Helper para obtener ubicación dinámica del proveedor / cliente (placeholder: debería venir de Firestore en tiempo real)
-  const providerLocation = reservation?.providerLocation; // { lat, lng, updatedAt }
+  const providerLocation = reservation?.providerLocation; // { lat, lng, updatedAt } recibido desde Firestore
+  // Nueva ubicación en vivo (sin esperar a que se propague a Firestore) cuando el proveedor activa "Compartir mi ubicación"
+  const [liveProviderPos, setLiveProviderPos] = useState<{ lat:number; lng:number } | null>(null);
   const clientLocation = reservation?.clientLocation || (reservation?.address?.lat && reservation?.address?.lng ? { lat: reservation.address.lat, lng: reservation.address.lng } : null);
 
-  const canShowRoute = providerLocation && clientLocation;
+  const hasClientLocation = !!clientLocation;
+  // Usamos la posición efectiva para dibujar la ruta: si el proveedor está viendo la reserva y tiene tracking activo, preferimos la local en vivo.
+  const effectiveProviderLocation = isProvider ? (liveProviderPos || providerLocation) : providerLocation;
+  const hasProviderLocation = !!effectiveProviderLocation;
+  const canShowRoute = hasClientLocation && hasProviderLocation;
 
-  const computeRoute = useCallback(async () => {
-    if (!canShowRoute || !reservationId) return;
+  // Pequeña función util para distancia (m) entre dos puntos
+  const haversine = (a:{lat:number;lng:number}, b:{lat:number;lng:number}) => {
+    const R = 6371e3; const toRad = (d:number)=>d*Math.PI/180;
+    const dLat = toRad(b.lat - a.lat); const dLng = toRad(b.lng - a.lng);
+    const la1 = toRad(a.lat); const la2 = toRad(b.lat);
+    const h = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLng/2)**2;
+    return 2*R*Math.atan2(Math.sqrt(h), Math.sqrt(1-h));
+  };
+
+  const lastRouteMetaRef = useRef<{ origin?:{lat:number;lng:number}; dest?:{lat:number;lng:number}; ts:number }|null>(null);
+  const ROUTE_MIN_TIME_MS = 15000; // no recalcular más rápido que cada 15s automáticamente
+  const ROUTE_MIN_MOVE_M = 30; // o si se movió >30m
+
+  const computeRoute = useCallback(async (force = false) => {
+    if (!canShowRoute || !reservationId || !effectiveProviderLocation || !clientLocation) return;
+    const now = Date.now();
+    const meta = lastRouteMetaRef.current;
+    if (!force && meta) {
+      const dt = now - meta.ts;
+      const moved = haversine(meta.origin!, effectiveProviderLocation) > ROUTE_MIN_MOVE_M;
+      if (dt < ROUTE_MIN_TIME_MS && !moved) return; // throttle
+    }
     setRouteLoading(true);
     try {
-      const apiKey = 'AIzaSyBrUoLvY2cDFD6zEcfN_-tseOEkPkxvTjY'; // TODO: reemplazar por variable de entorno / config
+  const apiKey = GOOGLE_MAPS_API_KEY; // desde .env
       const result = await fetchRoute({
-        origin: { latitude: providerLocation.lat, longitude: providerLocation.lng },
+        origin: { latitude: effectiveProviderLocation.lat, longitude: effectiveProviderLocation.lng },
         destination: { latitude: clientLocation.lat, longitude: clientLocation.lng },
         apiKey
       });
       setRoutePoints(result.points);
-      // Guardar distancia/tiempo si aún no existe o cambió
-      const dist = result.distanceText;
-      const dur = result.durationText;
+      lastRouteMetaRef.current = { origin: { ...effectiveProviderLocation }, dest: { ...clientLocation }, ts: now };
+      const dist = result.distanceText; const dur = result.durationText;
       if ((dist && dist !== reservation?.routeDistanceText) || (dur && dur !== reservation?.routeDurationText)) {
         try { await updateReservation(reservationId, { routeDistanceText: dist, routeDurationText: dur }); } catch {}
       }
-      // Ajustar cámara
       if (mapRef.current && result.points.length) {
         try { mapRef.current.fitToCoordinates(result.points, { edgePadding:{ top:80,left:40,right:40,bottom:80 }, animated:true }); } catch {}
       }
-    } catch (e:any) {
+    } catch(e:any){
       console.warn('computeRoute error', e.message);
-    } finally {
-      setRouteLoading(false);
-    }
-  }, [canShowRoute, providerLocation, clientLocation, reservationId, reservation?.routeDistanceText, reservation?.routeDurationText]);
+    } finally { setRouteLoading(false); }
+  }, [canShowRoute, effectiveProviderLocation?.lat, effectiveProviderLocation?.lng, clientLocation?.lat, clientLocation?.lng, reservationId, reservation?.routeDistanceText, reservation?.routeDurationText]);
 
   // Recalcular ruta cuando cambien ubicaciones
   useEffect(()=>{ computeRoute(); }, [computeRoute]);
+
+  // Watch local (en vivo) sólo para el proveedor activo compartiendo su ubicación.
+  useEffect(() => {
+    if (!(isProvider && sharingLocation)) { setLiveProviderPos(null); return; }
+    let watchId: number | null = null;
+    try {
+      const geo: any = (navigator as any)?.geolocation;
+      if (geo && typeof geo.watchPosition === 'function') {
+        watchId = geo.watchPosition(
+          (pos: any) => {
+            const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            setLiveProviderPos(p);
+            // Intentar recomputar ruta (throttle interno se encargará)
+            computeRoute();
+          },
+          (err: any) => console.warn('[liveProviderPos] watch error', err?.message),
+          { enableHighAccuracy: true, distanceFilter: 0, maximumAge: 0 }
+        );
+      }
+    } catch {}
+    return () => { if (watchId!=null && navigator?.geolocation?.clearWatch) try { navigator.geolocation.clearWatch(watchId); } catch {} };
+  }, [isProvider, sharingLocation, computeRoute]);
 
   // load role
   useEffect(() => {
@@ -121,7 +172,23 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
   const handleSave = async () => {
     if (!reservationId) return;
     try {
-      await updateReservation(reservationId, { note: editNote || undefined, 'address.addressLine': editAddress || undefined });
+      const addressLine = editAddress || undefined;
+      // Intentar geocodificar si hay dirección nueva
+      let geo: any = null;
+      let geocodeHash: string | null = null;
+      if (addressLine) {
+        try {
+          geo = await geocodeAddressHybrid(addressLine, undefined, undefined, 'Honduras', { useOsmFallback: true });
+          geocodeHash = computeAddressHash(addressLine, undefined, undefined, 'Honduras');
+        } catch (e:any) { console.warn('handleSave geocode', e.message); }
+      }
+      const updatePayload: any = { note: editNote || undefined };
+      if (addressLine) updatePayload['address.addressLine'] = addressLine;
+      if (geocodeHash) updatePayload['address.geocodeHash'] = geocodeHash;
+      if (geo) {
+        updatePayload.clientLocation = { lat: geo.lat, lng: geo.lng, updatedAt: new Date(), source: 'geocode_edit' };
+      }
+      await updateReservation(reservationId, updatePayload);
       setEditing(false);
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'No se pudo actualizar');
@@ -137,6 +204,33 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
   const handleAccept = async () => {
     if (!reservationId) return;
     try { await acceptReservation(reservationId); } catch(e:any){ Alert.alert('Error', e?.message || 'No se pudo aceptar'); }
+  };
+
+  const openFinishFlow = () => {
+    if (!reservationId || status !== 'in_progress') {
+      Alert.alert('Finalización','La reserva no está en progreso.');
+      return;
+    }
+    setShowPaymentModal(true);
+  };
+
+  const handleConfirmPayment = async (data: { method:'card'|'cash'; cardId?: string; breakdown:any }) => {
+    if (!reservationId) return;
+    try {
+      setFinalizing(true);
+      await confirmCompletion(reservationId, {
+        paymentMethod: data.method,
+        paymentInfo: data.method==='card'? { cardId: data.cardId }: undefined,
+        breakdown: data.breakdown,
+        markPaid: data.method==='cash'? false : true,
+      });
+      setShowPaymentModal(false);
+      Alert.alert('Reserva','Servicio marcado como completado');
+    } catch (e:any) {
+      Alert.alert('Error', e?.message || 'No se pudo completar');
+    } finally {
+      setFinalizing(false);
+    }
   };
 
   const headerStatusLabel = (s?: string) => {
@@ -196,6 +290,16 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
     return `${Math.round(diff/3600000)}h`;
   };
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const uid = (user as any)?.uid; if (!uid) return;
+        const pm = await listPaymentMethods(uid);
+        setCards(pm);
+      } catch {}
+    })();
+  }, [user]);
+
   return (
     <View style={[styles.modalContainer, { backgroundColor: colors.overlay }]}>
       <View style={[styles.sheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -232,39 +336,47 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
               {reservation.note ? (
                 <Text style={{ color: colors.muted, marginTop: 4 }}>{reservation.note}</Text>
               ) : null}
-              {canShowRoute && (
+              {(hasClientLocation) && (
                 <View style={{ height: 220, marginTop: 12, borderRadius:12, overflow:'hidden' }}>
                   <MapView
                     ref={(r) => { mapRef.current = r; }}
                     style={{ flex:1 }}
                     initialRegion={{
-                      latitude: providerLocation.lat,
-                      longitude: providerLocation.lng,
+                      latitude: (providerLocation?.lat ?? clientLocation.lat),
+                      longitude: (providerLocation?.lng ?? clientLocation.lng),
                       latitudeDelta: 0.02,
                       longitudeDelta: 0.02
                     }}
                   >
-                    <Marker coordinate={{ latitude: providerLocation.lat, longitude: providerLocation.lng }} title="Proveedor" pinColor={colors.primary} />
-                    <Marker coordinate={{ latitude: clientLocation.lat, longitude: clientLocation.lng }} title="Cliente" />
-                    {routePoints.length > 0 && <Polyline coordinates={routePoints} strokeWidth={5} strokeColor={colors.primary} />}
+                    {hasProviderLocation && (
+                      <Marker coordinate={{ latitude: effectiveProviderLocation!.lat, longitude: effectiveProviderLocation!.lng }} title={isProvider ? 'Tú' : 'Proveedor'} pinColor={colors.primary} />
+                    )}
+                    <Marker coordinate={{ latitude: clientLocation!.lat, longitude: clientLocation!.lng }} title="Destino" />
+                    {canShowRoute && routePoints.length > 0 && <Polyline coordinates={routePoints} strokeWidth={5} strokeColor={colors.primary} />}
                   </MapView>
                   <View style={{ position:'absolute', left:10, top:10, backgroundColor: colors.card, padding:8, borderRadius:8 }}>
-                    {routeLoading ? (
+                    {canShowRoute ? (routeLoading ? (
                       <ActivityIndicator size="small" color={colors.primary} />
                     ) : (
                       <Text style={{ color: colors.text, fontSize:12 }}>
                         {reservation.routeDistanceText || '...'} / {reservation.routeDurationText || ''}
                       </Text>
+                    )) : (
+                      <Text style={{ color: colors.muted, fontSize:12 }}>Esperando ubicación del proveedor...</Text>
                     )}
                   </View>
-                  <View style={{ position:'absolute', left:10, bottom:10, backgroundColor: colors.card, paddingHorizontal:8, paddingVertical:6, borderRadius:8 }}>
-                    <Text style={{ color: colors.muted, fontSize:11 }}>
-                      Prov. actualización: {relativeTime(lastProviderUpdateDate)}
-                    </Text>
-                  </View>
-                  <TouchableOpacity onPress={computeRoute} style={{ position:'absolute', right:10, top:10, backgroundColor: colors.primary, paddingHorizontal:12, paddingVertical:8, borderRadius:8 }}>
-                    <Text style={{ color:'#fff', fontSize:12, fontWeight:'600' }}>Refrescar ruta</Text>
-                  </TouchableOpacity>
+                  {hasProviderLocation && (
+                    <View style={{ position:'absolute', left:10, bottom:10, backgroundColor: colors.card, paddingHorizontal:8, paddingVertical:6, borderRadius:8 }}>
+                      <Text style={{ color: colors.muted, fontSize:11 }}>
+                        Prov. actualización: {relativeTime(lastProviderUpdateDate)} {isProvider && liveProviderPos ? '(local)' : ''}
+                      </Text>
+                    </View>
+                  )}
+                  {canShowRoute && (
+                    <TouchableOpacity onPress={() => computeRoute(true)} style={{ position:'absolute', right:10, top:10, backgroundColor: colors.primary, paddingHorizontal:12, paddingVertical:8, borderRadius:8 }}>
+                      <Text style={{ color:'#fff', fontSize:12, fontWeight:'600' }}>Refrescar ruta</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               )}
               {(isProvider && reservation?.providerId === (user as any)?.uid && ['confirmed','in_progress'].includes(status || '')) && (
@@ -272,14 +384,19 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
                   <TouchableOpacity
                     onPress={async () => {
                       if (!sharingLocation) {
-                        // Vamos a activar: primero verificar disponibilidad
-                        if (typeof navigator === 'undefined' || !navigator.geolocation) {
-                          Alert.alert('Ubicación no disponible', 'Este entorno no expone geolocalización. Prueba en un dispositivo físico o habilita el permiso en el emulador.');
+                        if (!hasLocationCapability()) {
+                          const msg = `El dispositivo/emulador no expone API de localización o no está configurada.
+Revisa:
+- Emulador con Google Play Services (crea AVD con Google APIs).
+- Ubicación simulada enviada (Extended Controls > Location).
+- Reinstalación tras agregar la librería.
+Si persiste, prueba en un dispositivo físico.`;
+                          Alert.alert('Ubicación no disponible', msg);
                           return;
                         }
                         const perm = await requestLocationPermission();
-                        if (perm !== 'granted') {
-                          Alert.alert('Permiso requerido', 'Necesitamos el permiso de ubicación para compartirla.');
+                        if (perm.status !== 'granted' && perm.status !== 'limited') {
+                          Alert.alert('Permiso requerido', 'Necesitamos el permiso de ubicación (precisa o aproximada) para compartirla.');
                           return;
                         }
                       }
@@ -304,14 +421,14 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
                       Enviando ubicación periódicamente (filtro cada ~10s y ≥25m).
                     </Text>
                   )}
-                  {(!sharingLocation && (typeof navigator === 'undefined' || !navigator.geolocation)) && (
+                  {(!sharingLocation && !hasLocationCapability()) && (
                     <Text style={{ color: colors.danger, fontSize:11, marginTop:6 }}>
-                      Geolocalización no disponible (sin API del dispositivo). Usa un equipo físico o revisa la config del emulador.
+                      Geolocalización no disponible. Verifica configuración del emulador / permisos.
                     </Text>
                   )}
                 </View>
               )}
-              {!canShowRoute && (
+              {!hasClientLocation && (
                 <View style={{ marginTop:12, padding:12, borderRadius:12, borderWidth:1, borderColor: colors.border, backgroundColor: colors.inputBg }}>
                   <Text style={{ color: colors.text, fontWeight:'600', marginBottom:4 }}>Mapa / Ruta</Text>
                   <Text style={{ color: colors.muted, fontSize:12, lineHeight:16 }}>
@@ -419,9 +536,17 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
                 </View>
               </View>
             )}
+            {isProvider && status==='in_progress' && (
+              <View style={{ marginTop:12 }}>
+                <TouchableOpacity onPress={openFinishFlow} style={{ backgroundColor: colors.primary, padding:12, borderRadius:10 }}>
+                  <Text style={{ color:'#fff', fontWeight:'600', textAlign:'center' }}>Finalizar y cobrar</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </ScrollView>
         )}
       </View>
+      <PaymentModal visible={showPaymentModal} onClose={()=>setShowPaymentModal(false)} price={reservation?.price || reservation?.basePrice || 0} cards={cards} onConfirm={handleConfirmPayment} loading={finalizing} />
     </View>
   );
 }

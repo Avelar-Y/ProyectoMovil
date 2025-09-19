@@ -6,7 +6,7 @@ import { useRefresh } from '../contexts/RefreshContext';
 import CustomButton from '../components/CustomButton';
 import { useAuth } from '../contexts/AuthContext';
 import { saveReservation, getReservationsForService, getUserProfile, updateUserProfile, getOrCreateThread, appendReservationEvent } from '../services/firestoreService';
-import { geocodeAddress } from '../services/geocodingService';
+import { geocodeAddressHybrid } from '../services/geocodingService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function ServiceDetail({ route, navigation }: any) {
@@ -174,13 +174,16 @@ export default function ServiceDetail({ route, navigation }: any) {
                 }
             } catch {}
 
-            // Intentar geocodificar la dirección (se usa tanto si proviene de addresses guardadas como si fue escrita)
-            let geoLat: number | undefined; let geoLng: number | undefined; let formattedAddress: string | undefined;
+            // Geocodificación híbrida (Google -> fallback OSM). Si falla Google por REQUEST_DENIED aún intentará OSM.
+            let geoLat: number | undefined; let geoLng: number | undefined; let formattedAddress: string | undefined; let geocodeProvider: string | undefined;
             try {
-                const geo = await geocodeAddress(addressLine, city, province, country);
-                if (geo) { geoLat = geo.lat; geoLng = geo.lng; formattedAddress = geo.formattedAddress; }
+                const geo = await geocodeAddressHybrid(addressLine, city, province, country, { useOsmFallback: true });
+                if (geo) { geoLat = geo.lat; geoLng = geo.lng; formattedAddress = geo.formattedAddress; geocodeProvider = (geo as any).source || undefined; }
+                else {
+                    console.warn('Geocoding híbrido no devolvió coordenadas (posible falta de precisión en la dirección).');
+                }
             } catch (e:any) {
-                console.warn('Geocoding falló, se continúa sin lat/lng', e?.message);
+                console.warn('Geocoding híbrido falló, se continúa sin lat/lng', e?.message);
             }
 
             const reservationData: any = {
@@ -203,6 +206,7 @@ export default function ServiceDetail({ route, navigation }: any) {
                     country: country || undefined,
                     lat: geoLat,
                     lng: geoLng,
+                    geocodeProvider: geocodeProvider,
                 },
                 amount,
                 currency,
@@ -211,7 +215,7 @@ export default function ServiceDetail({ route, navigation }: any) {
             };
 
             if (geoLat && geoLng) {
-                reservationData.clientLocation = { lat: geoLat, lng: geoLng, updatedAt: new Date() };
+                reservationData.clientLocation = { lat: geoLat, lng: geoLng, updatedAt: new Date(), provider: geocodeProvider };
             }
 
             const id = await saveReservation(reservationData);

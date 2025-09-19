@@ -18,3 +18,9 @@ declare module 'react-native-keychain' {
   const Keychain: any;
   export default Keychain;
 }
+
+// Declaraciones para variables de entorno cargadas vía react-native-dotenv
+declare module '@env' {
+  export const GOOGLE_MAPS_API_KEY: string;
+  export const APP_COMMISSION_PERCENT: string;
+}

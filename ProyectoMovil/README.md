@@ -247,3 +247,35 @@ Ventajas:
 - Facilidad para extender (añadir contador, ícono de cierre, etc.).
 
 
+## Geocodificación automática de direcciones
+
+Al crear una reserva (`saveReservation`) si no se proporcionan coordenadas pero sí una dirección textual (`addressLine` / `city` / `province` / `country`) el sistema intenta:
+
+1. Geocodificar usando Google Geocoding API (clave `GOOGLE_MAPS_API_KEY`).
+2. Si falla o devuelve `ZERO_RESULTS` y está permitido, hace fallback a Nominatim (OpenStreetMap).
+3. Guarda `clientLocation { lat, lng, updatedAt, source }` y un hash `address.geocodeHash` para evitar recomputar si la dirección no cambió.
+
+Al editar la dirección en `ActiveReservationDetail` se vuelve a geocodificar y se actualiza `clientLocation`.
+
+### Variables de entorno
+Definir en `.env` (no commitear):
+```
+GOOGLE_MAPS_API_KEY=TU_KEY
+```
+Android usa `manifestPlaceholders` para inyectarla en el `AndroidManifest.xml`.
+
+### Fallback Nominatim
+Uso responsable (tasa limitada). Para producción intensiva se recomienda solo Google o cache persistente.
+
+### Errores comunes
+| Código | Causa | Acción |
+|--------|-------|--------|
+| REQUEST_DENIED | Billing no habilitado / API desactivada | Activar Billing y Geocoding/Directions API |
+| ZERO_RESULTS | Dirección insuficiente o ambigua | Pedir más detalle (ej. ciudad y país) |
+| OVER_DAILY_LIMIT | Límite diario excedido | Revisar cuota / optimizar cache |
+
+### Extensión futura
+- Cache persistente (AsyncStorage) para direcciones frecuentes.
+- Reverse geocoding para mostrar direcciones legibles de coordenadas capturadas.
+
+

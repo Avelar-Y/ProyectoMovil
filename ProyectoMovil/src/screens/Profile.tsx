@@ -5,6 +5,9 @@ import CustomButton from '../components/CustomButton';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useRefresh } from '../contexts/RefreshContext';
+import AddCardModal from '../components/AddCardModal';
+import { listPaymentMethods, addPaymentMethod, removePaymentMethod } from '../services/payments/paymentService';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function Profile({ navigation }: any) {
     const { user, logout } = useAuth();
@@ -28,6 +31,9 @@ export default function Profile({ navigation }: any) {
     const [addrPostal, setAddrPostal] = useState('');
     const [addrCountry, setAddrCountry] = useState('');
     const [showAddrForm, setShowAddrForm] = useState(false);
+    const [cards, setCards] = useState<any[]>([]);
+    const [cardModal, setCardModal] = useState(false);
+    const insets = useSafeAreaInsets();
 
     useEffect(() => {
         let mounted = true;
@@ -52,6 +58,7 @@ export default function Profile({ navigation }: any) {
                 const res = await getReservationsForUser(user.email || user.uid);
                 if (!mounted) return;
                 setReservations(res || []);
+                try { const pm = await listPaymentMethods(user.uid); if (mounted) setCards(pm); } catch {}
             } catch (err) {
                 console.warn('Profile load error', err);
             } finally {
@@ -143,9 +150,24 @@ export default function Profile({ navigation }: any) {
         }
     };
 
+    const handleAddCard = async (data: any) => {
+        if (!user?.uid) throw new Error('Usuario no autenticado');
+        // Guardamos sólo metadata mínima (sin PAN completo real en producción)
+        const { brand, last4, expMonth, expYear, holder } = { brand: data.brand, last4: data.last4, expMonth: data.expMonth, expYear: data.expYear, holder: data.holder };
+        const id = await addPaymentMethod(user.uid, { brand, last4, expMonth, expYear, holderName: holder });
+        setCards([{ id, brand, last4, expMonth, expYear, holderName: holder }, ...cards]);
+    };
+    const handleDeleteCard = async (id: string) => {
+        if (!user?.uid) return;
+        try {
+            await removePaymentMethod(user.uid, id);
+            setCards(cards.filter(c => c.id !== id));
+        } catch (e:any) { Alert.alert('Error', e?.message || 'No se pudo eliminar'); }
+    };
+
     return (
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-                <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled"
+                <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={[styles.container, { paddingBottom: (insets.bottom || 16) + 140 }]} keyboardShouldPersistTaps="handled"
                     refreshControl={<RefreshControl refreshing={refreshCtx.refreshing || loading} onRefresh={async () => await refreshCtx.triggerRefresh()} />}
                 >
                 <View style={[styles.headerCard, { backgroundColor: colors.card, borderColor: colors.border }]}> 
@@ -304,9 +326,29 @@ export default function Profile({ navigation }: any) {
                                 )}
                             </View>
                         </View>
+                        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+                          <Text style={[styles.sectionTitle, { color: colors.text }]}>Métodos de pago</Text>
+                          {cards.length === 0 ? (
+                            <Text style={{ color: colors.muted, marginTop:8 }}>No tienes tarjetas guardadas.</Text>
+                          ) : (
+                            <View>
+                              {cards.map(card => (
+                                <View key={card.id} style={[styles.choiceRow, { backgroundColor: colors.card, flexDirection:'row', justifyContent:'space-between', alignItems:'center' }]}> 
+                                  <View>
+                                    <Text style={{ color: colors.text, fontWeight:'600' }}>{card.brand.toUpperCase()} •••• {card.last4}</Text>
+                                    <Text style={{ color: colors.muted, fontSize:12 }}>Exp {String(card.expMonth).padStart(2,'0')}/{String(card.expYear).slice(-2)}</Text>
+                                  </View>
+                                  <TouchableOpacity onPress={() => handleDeleteCard(card.id)}><Text style={{ color: colors.muted, fontSize:12 }}>Eliminar</Text></TouchableOpacity>
+                                </View>
+                              ))}
+                            </View>
+                          )}
+                          <CustomButton title='Agregar tarjeta' onPress={() => setCardModal(true)} variant='primary' />
+                        </View>
                     </View>
                 )}
             </ScrollView>
+            <AddCardModal visible={cardModal} onClose={() => setCardModal(false)} onSave={handleAddCard} />
         </KeyboardAvoidingView>
     );
 }
@@ -363,4 +405,5 @@ const styles = StyleSheet.create({
     segmentRow: { flexDirection: 'row', marginTop: 4 },
     segmentItem: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 12, marginRight: 8, borderWidth: 1 },
     rolePill: { alignSelf:'flex-start', paddingHorizontal:10, paddingVertical:4, borderRadius:12, marginTop:8, borderWidth:1 }
+    ,
 });
