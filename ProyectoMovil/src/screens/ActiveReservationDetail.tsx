@@ -3,11 +3,12 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { listenReservation, updateReservation, cancelReservationAtomic, acceptReservation, getUserProfile, confirmCompletion } from '../services/firestoreService';
+import { useRefresh } from '../contexts/RefreshContext';
+import { listenReservation, updateReservation, cancelReservationAtomic, getUserProfile, confirmCompletion, acceptReservationExclusive } from '../services/firestoreService';
 import { geocodeAddressHybrid, computeAddressHash } from '../services/geocodingService';
 import { fetchRoute } from '../services/directionsService';
 import { GOOGLE_MAPS_API_KEY } from '@env';
-import { startProviderLocationUpdates, stopProviderLocationUpdates, isTrackingActive, hasLocationCapability } from '../services/locationTracking';
+import { stopProviderLocationUpdates, hasLocationCapability } from '../services/locationTracking';
 import { requestLocationPermission } from '../services/permissions';
 import PaymentModal from '../components/PaymentModal';
 import { listPaymentMethods } from '../services/payments/paymentService';
@@ -19,6 +20,7 @@ const STATUS_FLOW: string[] = ['pending','confirmed','in_progress','completed'];
 export default function ActiveReservationDetail({ route, navigation }: Props) {
   const { colors } = useTheme();
   const { user } = useAuth();
+  const { triggerRefresh } = useRefresh();
   const initial = route.params?.reservation || null;
   const reservationId = initial?.id || route.params?.reservationId;
   const [reservation, setReservation] = useState<any | null>(initial);
@@ -34,23 +36,24 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
   const [routePoints, setRoutePoints] = useState<{ latitude:number; longitude:number }[]>([]);
   const [routeLoading, setRouteLoading] = useState(false);
   const mapRef = useRef<MapView | null>(null);
-  const [sharingLocation, setSharingLocation] = useState(false);
-  const [trackingError, setTrackingError] = useState<string | null>(null);
+  // Tracking proveedor desactivado temporalmente
+  const [sharingLocation] = useState(false);
+  const [trackingError] = useState<string | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [cards, setCards] = useState<any[]>([]);
   const [finalizing, setFinalizing] = useState(false);
 
   // Helper para obtener ubicación dinámica del proveedor / cliente (placeholder: debería venir de Firestore en tiempo real)
-  const providerLocation = reservation?.providerLocation; // { lat, lng, updatedAt } recibido desde Firestore
-  // Nueva ubicación en vivo (sin esperar a que se propague a Firestore) cuando el proveedor activa "Compartir mi ubicación"
-  const [liveProviderPos, setLiveProviderPos] = useState<{ lat:number; lng:number } | null>(null);
+  // Desactivamos ubicación de proveedor (marcador y ruta). Mantener tipos coherentes.
+  const providerLocation: { lat:number; lng:number } | null = null;
+  const [liveProviderPos] = useState<{ lat:number; lng:number } | null>(null);
   const clientLocation = reservation?.clientLocation || (reservation?.address?.lat && reservation?.address?.lng ? { lat: reservation.address.lat, lng: reservation.address.lng } : null);
 
   const hasClientLocation = !!clientLocation;
   // Usamos la posición efectiva para dibujar la ruta: si el proveedor está viendo la reserva y tiene tracking activo, preferimos la local en vivo.
-  const effectiveProviderLocation = isProvider ? (liveProviderPos || providerLocation) : providerLocation;
-  const hasProviderLocation = !!effectiveProviderLocation;
-  const canShowRoute = hasClientLocation && hasProviderLocation;
+  const effectiveProviderLocation: { lat:number; lng:number } | null = null; // Forzamos null para ocultar marker y ruta
+  const hasProviderLocation = false;
+  const canShowRoute = false; // Ruta deshabilitada (sin provider)
 
   // Pequeña función util para distancia (m) entre dos puntos
   const haversine = (a:{lat:number;lng:number}, b:{lat:number;lng:number}) => {
@@ -65,61 +68,16 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
   const ROUTE_MIN_TIME_MS = 15000; // no recalcular más rápido que cada 15s automáticamente
   const ROUTE_MIN_MOVE_M = 30; // o si se movió >30m
 
-  const computeRoute = useCallback(async (force = false) => {
-    if (!canShowRoute || !reservationId || !effectiveProviderLocation || !clientLocation) return;
-    const now = Date.now();
-    const meta = lastRouteMetaRef.current;
-    if (!force && meta) {
-      const dt = now - meta.ts;
-      const moved = haversine(meta.origin!, effectiveProviderLocation) > ROUTE_MIN_MOVE_M;
-      if (dt < ROUTE_MIN_TIME_MS && !moved) return; // throttle
-    }
-    setRouteLoading(true);
-    try {
-  const apiKey = GOOGLE_MAPS_API_KEY; // desde .env
-      const result = await fetchRoute({
-        origin: { latitude: effectiveProviderLocation.lat, longitude: effectiveProviderLocation.lng },
-        destination: { latitude: clientLocation.lat, longitude: clientLocation.lng },
-        apiKey
-      });
-      setRoutePoints(result.points);
-      lastRouteMetaRef.current = { origin: { ...effectiveProviderLocation }, dest: { ...clientLocation }, ts: now };
-      const dist = result.distanceText; const dur = result.durationText;
-      if ((dist && dist !== reservation?.routeDistanceText) || (dur && dur !== reservation?.routeDurationText)) {
-        try { await updateReservation(reservationId, { routeDistanceText: dist, routeDurationText: dur }); } catch {}
-      }
-      if (mapRef.current && result.points.length) {
-        try { mapRef.current.fitToCoordinates(result.points, { edgePadding:{ top:80,left:40,right:40,bottom:80 }, animated:true }); } catch {}
-      }
-    } catch(e:any){
-      console.warn('computeRoute error', e.message);
-    } finally { setRouteLoading(false); }
-  }, [canShowRoute, effectiveProviderLocation?.lat, effectiveProviderLocation?.lng, clientLocation?.lat, clientLocation?.lng, reservationId, reservation?.routeDistanceText, reservation?.routeDurationText]);
+  const computeRoute = useCallback(async () => {
+    // Ruta deshabilitada
+    return;
+  }, []);
 
   // Recalcular ruta cuando cambien ubicaciones
-  useEffect(()=>{ computeRoute(); }, [computeRoute]);
+  useEffect(()=>{ /* ruta deshabilitada */ }, []);
 
   // Watch local (en vivo) sólo para el proveedor activo compartiendo su ubicación.
-  useEffect(() => {
-    if (!(isProvider && sharingLocation)) { setLiveProviderPos(null); return; }
-    let watchId: number | null = null;
-    try {
-      const geo: any = (navigator as any)?.geolocation;
-      if (geo && typeof geo.watchPosition === 'function') {
-        watchId = geo.watchPosition(
-          (pos: any) => {
-            const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-            setLiveProviderPos(p);
-            // Intentar recomputar ruta (throttle interno se encargará)
-            computeRoute();
-          },
-          (err: any) => console.warn('[liveProviderPos] watch error', err?.message),
-          { enableHighAccuracy: true, distanceFilter: 0, maximumAge: 0 }
-        );
-      }
-    } catch {}
-    return () => { if (watchId!=null && navigator?.geolocation?.clearWatch) try { navigator.geolocation.clearWatch(watchId); } catch {} };
-  }, [isProvider, sharingLocation, computeRoute]);
+  // Tracking local deshabilitado
 
   // load role
   useEffect(() => {
@@ -203,7 +161,11 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
 
   const handleAccept = async () => {
     if (!reservationId) return;
-    try { await acceptReservation(reservationId); } catch(e:any){ Alert.alert('Error', e?.message || 'No se pudo aceptar'); }
+    try {
+      const uid = (user as any)?.uid;
+      if (!uid) throw new Error('Proveedor no autenticado');
+      await acceptReservationExclusive(reservationId, uid);
+    } catch(e:any){ Alert.alert('Error', e?.message || 'No se pudo aceptar'); }
   };
 
   const openFinishFlow = () => {
@@ -226,6 +188,8 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
       });
       setShowPaymentModal(false);
       Alert.alert('Reserva','Servicio marcado como completado');
+      // Disparar refresco global para que dashboards/listas reflejen el cambio
+      try { triggerRefresh(); } catch {}
     } catch (e:any) {
       Alert.alert('Error', e?.message || 'No se pudo completar');
     } finally {
@@ -244,44 +208,17 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
   // Iniciar/detener tracking cuando:
   // - El usuario es proveedor de la reserva
   // - Estado es confirmed o in_progress
-  useEffect(() => {
-    const eligible = isProvider && reservation?.providerId === (user as any)?.uid && ['confirmed','in_progress'].includes(status || '');
-    if (eligible && sharingLocation && reservationId) {
-      (async () => {
-        try {
-          setTrackingError(null);
-          // Reducimos umbrales para pruebas (5s / 5m). En producción se pueden subir.
-          await startProviderLocationUpdates(reservationId, { minTimeMs: 5000, minDistanceM: 5 } as any);
-        } catch (e:any) {
-          setTrackingError(e?.message || 'No se pudo iniciar tracking');
-          setSharingLocation(false);
-        }
-      })();
-    } else {
-      stopProviderLocationUpdates();
-    }
-    return () => { stopProviderLocationUpdates(); };
-  }, [sharingLocation, isProvider, status, reservation?.providerId, reservationId, user]);
+  // Efecto de tracking remoto deshabilitado
 
   // Recentrar mapa cuando cambie providerLocation de forma significativa
   const lastCenteredRef = useRef<{ lat:number; lng:number } | null>(null);
-  useEffect(() => {
-    if (!mapRef.current || !providerLocation) return;
-    const last = lastCenteredRef.current;
-    const changed = !last || Math.abs(last.lat - providerLocation.lat) > 0.00005 || Math.abs(last.lng - providerLocation.lng) > 0.00005; // ~5m
-    if (changed) {
-      try {
-        mapRef.current.animateCamera({ center: { latitude: providerLocation.lat, longitude: providerLocation.lng } });
-        lastCenteredRef.current = { lat: providerLocation.lat, lng: providerLocation.lng };
-      } catch {}
-    }
-  }, [providerLocation?.lat, providerLocation?.lng]);
+  // Centrado en proveedor deshabilitado
 
   // Util para formatear tiempo relativo última actualización
   const toDate = (v:any): Date | null => {
     if (!v) return null; if (v instanceof Date) return v; if (v.seconds) return new Date(v.seconds * 1000); if (typeof v === 'number') return new Date(v); return null;
   };
-  const lastProviderUpdateDate = toDate(providerLocation?.updatedAt);
+  const lastProviderUpdateDate = null;
   const relativeTime = (d: Date | null) => {
     if (!d) return '—';
     const diff = Date.now() - d.getTime();
@@ -342,92 +279,24 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
                     ref={(r) => { mapRef.current = r; }}
                     style={{ flex:1 }}
                     initialRegion={{
-                      latitude: (providerLocation?.lat ?? clientLocation.lat),
-                      longitude: (providerLocation?.lng ?? clientLocation.lng),
+                      latitude: clientLocation.lat,
+                      longitude: clientLocation.lng,
                       latitudeDelta: 0.02,
                       longitudeDelta: 0.02
                     }}
                   >
-                    {hasProviderLocation && (
-                      <Marker coordinate={{ latitude: effectiveProviderLocation!.lat, longitude: effectiveProviderLocation!.lng }} title={isProvider ? 'Tú' : 'Proveedor'} pinColor={colors.primary} />
-                    )}
+                    {/* Marker de proveedor deshabilitado */}
                     <Marker coordinate={{ latitude: clientLocation!.lat, longitude: clientLocation!.lng }} title="Destino" />
-                    {canShowRoute && routePoints.length > 0 && <Polyline coordinates={routePoints} strokeWidth={5} strokeColor={colors.primary} />}
+                    {/* Ruta deshabilitada */}
                   </MapView>
-                  <View style={{ position:'absolute', left:10, top:10, backgroundColor: colors.card, padding:8, borderRadius:8 }}>
-                    {canShowRoute ? (routeLoading ? (
-                      <ActivityIndicator size="small" color={colors.primary} />
-                    ) : (
-                      <Text style={{ color: colors.text, fontSize:12 }}>
-                        {reservation.routeDistanceText || '...'} / {reservation.routeDurationText || ''}
-                      </Text>
-                    )) : (
-                      <Text style={{ color: colors.muted, fontSize:12 }}>Esperando ubicación del proveedor...</Text>
-                    )}
-                  </View>
-                  {hasProviderLocation && (
-                    <View style={{ position:'absolute', left:10, bottom:10, backgroundColor: colors.card, paddingHorizontal:8, paddingVertical:6, borderRadius:8 }}>
-                      <Text style={{ color: colors.muted, fontSize:11 }}>
-                        Prov. actualización: {relativeTime(lastProviderUpdateDate)} {isProvider && liveProviderPos ? '(local)' : ''}
-                      </Text>
-                    </View>
-                  )}
-                  {canShowRoute && (
-                    <TouchableOpacity onPress={() => computeRoute(true)} style={{ position:'absolute', right:10, top:10, backgroundColor: colors.primary, paddingHorizontal:12, paddingVertical:8, borderRadius:8 }}>
-                      <Text style={{ color:'#fff', fontSize:12, fontWeight:'600' }}>Refrescar ruta</Text>
-                    </TouchableOpacity>
-                  )}
+                  {/* <View style={{ position:'absolute', left:10, top:10, backgroundColor: colors.card, padding:8, borderRadius:8 }}>
+                    <Text style={{ color: colors.muted, fontSize:12 }}>Ubicación del proveedor desactivada temporalmente.</Text>
+                  </View> */}
+                  {/* Indicador de actualización proveedor oculto */}
+                  {/* Botón refrescar ruta deshabilitado */}
                 </View>
               )}
-              {(isProvider && reservation?.providerId === (user as any)?.uid && ['confirmed','in_progress'].includes(status || '')) && (
-                <View style={{ marginTop:12 }}>
-                  <TouchableOpacity
-                    onPress={async () => {
-                      if (!sharingLocation) {
-                        if (!hasLocationCapability()) {
-                          const msg = `El dispositivo/emulador no expone API de localización o no está configurada.
-Revisa:
-- Emulador con Google Play Services (crea AVD con Google APIs).
-- Ubicación simulada enviada (Extended Controls > Location).
-- Reinstalación tras agregar la librería.
-Si persiste, prueba en un dispositivo físico.`;
-                          Alert.alert('Ubicación no disponible', msg);
-                          return;
-                        }
-                        const perm = await requestLocationPermission();
-                        if (perm.status !== 'granted' && perm.status !== 'limited') {
-                          Alert.alert('Permiso requerido', 'Necesitamos el permiso de ubicación (precisa o aproximada) para compartirla.');
-                          return;
-                        }
-                      }
-                      setSharingLocation(prev => !prev);
-                    }}
-                    style={{ backgroundColor: sharingLocation ? colors.primary : colors.highlight, paddingVertical:12, borderRadius:10, alignItems:'center' }}
-                  >
-                    <Text style={{ color: sharingLocation ? '#fff' : colors.primary, fontWeight:'600' }}>
-                      {sharingLocation ? 'Dejar de compartir mi ubicación' : 'Compartir mi ubicación'}
-                    </Text>
-                  </TouchableOpacity>
-                  {trackingError && (
-                    <Text style={{ color: colors.danger, fontSize:12, marginTop:6 }}>{trackingError}</Text>
-                  )}
-                  {!sharingLocation && !trackingError && (
-                    <Text style={{ color: colors.muted, fontSize:11, marginTop:6 }}>
-                      Activa para que el cliente vea tu movimiento en el mapa.
-                    </Text>
-                  )}
-                  {sharingLocation && (
-                    <Text style={{ color: colors.muted, fontSize:11, marginTop:6 }}>
-                      Enviando ubicación periódicamente (filtro cada ~10s y ≥25m).
-                    </Text>
-                  )}
-                  {(!sharingLocation && !hasLocationCapability()) && (
-                    <Text style={{ color: colors.danger, fontSize:11, marginTop:6 }}>
-                      Geolocalización no disponible. Verifica configuración del emulador / permisos.
-                    </Text>
-                  )}
-                </View>
-              )}
+              {/* Bloque de compartir ubicación deshabilitado temporalmente */}
               {!hasClientLocation && (
                 <View style={{ marginTop:12, padding:12, borderRadius:12, borderWidth:1, borderColor: colors.border, backgroundColor: colors.inputBg }}>
                   <Text style={{ color: colors.text, fontWeight:'600', marginBottom:4 }}>Mapa / Ruta</Text>

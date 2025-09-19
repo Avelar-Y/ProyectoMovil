@@ -4,6 +4,10 @@
 // Aquí usamos la API global de geolocalización para simplicidad.
 
 import { updateReservation } from './firestoreService';
+
+// Flag global para habilitar/deshabilitar el envío de ubicación del proveedor a Firestore.
+// Solicitado: desactivar temporalmente -> false
+export const ENABLE_PROVIDER_LOCATION_SHARING = false;
 // Preferimos la librería nativa si está disponible
 let Geo: any = null;
 try {
@@ -117,7 +121,9 @@ export async function startProviderLocationUpdates(reservationId: string, opts: 
     try {
       const seedPos = await getCurrentProviderPosition();
       if (seedPos) {
-        await updateReservation(reservationId, { providerLocation: { ...seedPos, updatedAt: new Date() } });
+        if (ENABLE_PROVIDER_LOCATION_SHARING) {
+          await updateReservation(reservationId, { providerLocation: { ...seedPos, updatedAt: new Date() } });
+        }
         state.lastPoint = seedPos;
         state.lastTimestamp = Date.now();
       }
@@ -140,9 +146,9 @@ export async function startProviderLocationUpdates(reservationId: string, opts: 
     state.lastPoint = point;
     state.lastTimestamp = now;
     try {
-      if (state.reservationId) {
-  await updateReservation(state.reservationId, { providerLocation: { ...point, updatedAt: new Date() } });
-      }
+  if (state.reservationId && ENABLE_PROVIDER_LOCATION_SHARING) {
+	await updateReservation(state.reservationId, { providerLocation: { ...point, updatedAt: new Date() } });
+  }
     } catch (e) {
       console.warn('[locationTracking] Firestore update failed', (e as any)?.message);
     }

@@ -20,7 +20,7 @@ export default function PaymentModal({ visible, onClose, price, cards, defaultMe
   const { colors } = useTheme();
   const [method, setMethod] = useState<'card'|'cash'>(defaultMethod);
   const [cardId, setCardId] = useState<string | undefined>(cards[0]?.id);
-  const breakdown = computePaymentBreakdown(price || 0);
+  const breakdown = computePaymentBreakdown(price || 0, method);
   useEffect(()=>{ if (cards.length && !cardId) setCardId(cards[0].id); }, [cards.length]);
 
   const confirm = async () => {
@@ -54,9 +54,12 @@ export default function PaymentModal({ visible, onClose, price, cards, defaultMe
             </View>
           )}
           <View style={{ marginTop:16 }}>
-            <Text style={{ color: colors.text, fontWeight:'700', marginBottom:6 }}>Desglose</Text>
+            <Text style={{ color: colors.text, fontWeight:'700', marginBottom:6 }}>Desglose (HNL)</Text>
             <Line label='Subtotal servicio' value={breakdown.base} color={colors.text} />
-            <Line label={`Comisión (${breakdown.commissionPercent}% )`} value={breakdown.commissionAmount} color={colors.muted} />
+            <Line label='Comisión reservación' value={breakdown.bookingFee} color={colors.muted} />
+            {breakdown.processingPercent > 0 && (
+              <Line label={`Procesamiento (${breakdown.processingPercent}% )`} value={breakdown.processingAmount} color={colors.muted} />
+            )}
             <Line label='Total a pagar' value={breakdown.total} bold color={colors.text} />
             <Line label='Proveedor recibe' value={breakdown.providerReceives} color={colors.muted} small />
           </View>

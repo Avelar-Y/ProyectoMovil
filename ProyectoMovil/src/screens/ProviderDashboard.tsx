@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, A
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
-import { getServicesForProvider, saveService, getReservationsByProvider, updateReservationStatus, finishService, cancelReservation, setServiceActive, updateReservation } from '../services/firestoreService';
+import { getServicesForProvider, saveService, getReservationsByProvider, finishService, cancelReservation, setServiceActive, updateReservation, acceptReservationExclusive, startService, getUserProfile } from '../services/firestoreService';
 
 interface ProviderService { id?: string; title: string; price?: number; description?: string; }
 interface ProviderReservation { id?: string; status?: string; serviceSnapshot?: any; service?: string; userEmail?: string; note?: string; }
@@ -19,12 +19,19 @@ export default function ProviderDashboard() {
   const [form, setForm] = useState({ title:'', description:'', price:'', tags:'' });
   const [savingService, setSavingService] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [activeReservationId, setActiveReservationId] = useState<string|null>(null);
+  const [checkingActive, setCheckingActive] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
     try {
       setLoading(true);
       const uid = (user as any).uid;
+      // cargar perfil para sentinel
+      try {
+        const profile = await getUserProfile(uid);
+        setActiveReservationId(profile?.activeReservationId || null);
+      } catch(e){ console.warn('Load profile sentinel error', e); }
       const [svc, res] = await Promise.all([
         getServicesForProvider(uid),
         getReservationsByProvider(uid)
@@ -68,21 +75,23 @@ export default function ProviderDashboard() {
   // Acciones sobre la reserva desde el panel proveedor. IMPORTANTE:
   // Necesitamos guardar providerId cuando el proveedor "Acepta" para que la pantalla ActiveReservationDetail
   // pueda iniciar el tracking (condición: reservation.providerId === user.uid).
-  const updateReservationAction = async (id: string, action: 'accept'|'start'|'finish'|'cancel') => {
+  const updateReservationAction = async (id: string, action: 'accept'|'start'|'cancel') => {
     try {
       if (action==='accept') {
-        await updateReservationStatus(id,'confirmed');
+        const uid = (user as any).uid;
+        // si ya tengo activa distinta a esta, bloquear UX antes de lanzar transacción
+        if (activeReservationId && activeReservationId !== id) {
+          Alert.alert('Reserva activa','Debes finalizar o cancelar tu servicio activo antes de aceptar otro.');
+          return;
+        }
+        await acceptReservationExclusive(id, uid);
         try {
-          // Asignar providerId y metadatos básicos si aún no existen.
-          const uid = (user as any).uid;
-          await updateReservation(id, {
-            providerId: uid,
-            providerDisplayName: (user as any)?.displayName || (user as any)?.email || 'Proveedor',
-          });
-        } catch(e){ console.warn('Asignación providerId falló', e); }
+          await updateReservation(id, { providerDisplayName: (user as any)?.displayName || (user as any)?.email || 'Proveedor' });
+        } catch(e){ console.warn('Actualizar displayName proveedor falló', e); }
+        // Actualizar sentinel local
+        setActiveReservationId(id);
       }
-      else if (action==='start') await updateReservationStatus(id,'in_progress');
-      else if (action==='finish') await finishService(id, (user as any).uid);
+  else if (action==='start') await startService(id, (user as any).uid);
       else if (action==='cancel') await cancelReservation(id,'Proveedor canceló');
       load();
     } catch (e:any){
@@ -112,10 +121,12 @@ export default function ProviderDashboard() {
   const renderReservation = ({ item }: { item: ProviderReservation }) => {
     const status = item.status || 'pending';
     const title = item.serviceSnapshot?.title || item.service;
-    const actions: { label:string; act: any; show:boolean }[] = [
-      { label:'Aceptar', act:() => updateReservationAction(item.id!, 'accept'), show: status==='pending' },
+    interface ActionBtn { label:string; act:() => void; show:boolean; disabled?: boolean; tooltip?: string }
+    const goDetail = () => navigation.navigate('ActiveReservationDetail', { reservationId: item.id });
+    const actions: ActionBtn[] = [
+      { label:'Aceptar', act:() => updateReservationAction(item.id!, 'accept'), show: status==='pending', disabled: !!activeReservationId && activeReservationId !== item.id, tooltip: 'Ya tienes otra reserva activa.' },
       { label:'Iniciar', act:() => updateReservationAction(item.id!, 'start'), show: status==='confirmed' },
-      { label:'Finalizar', act:() => updateReservationAction(item.id!, 'finish'), show: status==='in_progress' },
+      { label:'Detalle', act: goDetail, show: ['confirmed','in_progress'].includes(status) },
       { label:'Cancelar', act:() => updateReservationAction(item.id!, 'cancel'), show: ['pending','confirmed'].includes(status) }
     ];
     return (
@@ -124,13 +135,20 @@ export default function ProviderDashboard() {
         <Text style={{ color: colors.muted, fontSize:12 }}>{item.userEmail}</Text>
         {!!item.note && <Text style={{ color: colors.muted, fontSize:11, marginTop:2 }} numberOfLines={2}>{item.note}</Text>}
         <View style={{ flexDirection:'row', flexWrap:'wrap', marginTop:6, gap:6 }}>
-          {actions.filter(a=>a.show).map(a => (
-            <TouchableOpacity key={a.label} onPress={a.act} style={[styles.actionBtn, { backgroundColor: a.label==='Cancelar'? colors.danger : colors.primary }]}> 
-              <Text style={{ color:'#fff', fontSize:11, fontWeight:'600' }}>{a.label}</Text>
-            </TouchableOpacity>
-          ))}
+          {actions.filter(a=>a.show).map(a => {
+            const disabled = a.disabled;
+            return (
+              <TouchableOpacity key={a.label} onPress={() => { if(!disabled) a.act(); else Alert.alert('No permitido', a.tooltip || 'Acción bloqueada'); }}
+                style={[styles.actionBtn, { backgroundColor: a.label==='Cancelar'? colors.danger : disabled? colors.muted : colors.primary, opacity: disabled? 0.6 : 1 }]}> 
+                <Text style={{ color:'#fff', fontSize:11, fontWeight:'600' }}>{a.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
         <Text style={{ color: colors.muted, fontSize:10, marginTop:6 }}>Estado: {status}</Text>
+        {activeReservationId && activeReservationId !== item.id && status==='pending' && (
+          <Text style={{ color: colors.muted, fontSize:10, marginTop:4 }}>Otra reserva activa: no puedes aceptar esta aún.</Text>
+        )}
       </View>
     );
   };

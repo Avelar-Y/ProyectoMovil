@@ -156,12 +156,22 @@ export default function History({ navigation }: any) {
         useCallback(() => {
             let mounted = true;
             const load = async () => {
-                if (!user?.email) return;
+                if (!user) return;
                 try {
-                    const res = await getReservationsForUser(user.email);
-                    if (mounted) setReservations(res);
+                    // Revalidar rol rápido para evitar parpadeo cuando se vuelve a la pestaña
+                    const uid = (user as any).uid;
+                    const profile = await getUserProfile(uid).catch(()=>null);
+                    const provider = profile?.role === 'provider';
+                    if (mounted) setIsProvider(provider);
+                    if (provider) {
+                        const docs = await getReservationsByProvider(uid);
+                        if (mounted) setReservations(docs);
+                    } else if (user.email) {
+                        const res = await getReservationsForUser(user.email);
+                        if (mounted) setReservations(res);
+                    }
                 } catch (err) {
-                    console.warn('getReservationsForUser error on focus', err);
+                    console.warn('History focus load error', err);
                 }
             };
             load();
@@ -170,8 +180,8 @@ export default function History({ navigation }: any) {
     );
 
     return (
-        <View style={styles.container}>
-            <Text style={styles.title}>{isProvider ? 'Historial de servicios' : 'Historial de reservas'}</Text>
+        <View style={[styles.container, { backgroundColor: colors.background }]}>
+            <Text style={[styles.title, { color: colors.text }]}>{isProvider ? 'Historial de servicios' : 'Historial de reservas'}</Text>
                         {loading ? <Text style={{ color: colors.muted }}>Cargando...</Text> : (
                             <>
                                 {/* Search bar for history */}
@@ -263,6 +273,8 @@ export default function History({ navigation }: any) {
                         const handlePress = () => {
                             if (isActive) {
                                 navigation.navigate('ActiveReservationDetail', { reservationId: item.id });
+                            } else if (['completed','cancelled'].includes(status)) {
+                                navigation.navigate('ReservationSummary', { reservationId: item.id });
                             } else {
                                 navigation.navigate('ServiceDetail', { reservationId: item.id, service: item.serviceSnapshot || item.service });
                             }
@@ -294,16 +306,16 @@ export default function History({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20, backgroundColor: '#f5f6fa' },
+    container: { flex: 1, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20 },
     title: { fontSize: 20, fontWeight: '700', marginBottom: 10 },
     item: { padding: 12, borderRadius: 12, marginBottom: 10, borderWidth:1 },
     itemTitle: { fontWeight: '700' },
     note: { marginTop: 6 },
-        statusChip: { paddingHorizontal:10, paddingVertical:4, borderRadius:12 },
-        searchWrapper: { flexDirection:'row', alignItems:'center', borderWidth:1, borderRadius:12, paddingHorizontal:12, paddingVertical:6, marginBottom:6 },
-        sectionHeader: { paddingHorizontal:4, paddingVertical:6 },
-        statsRow: { flexDirection:'row', justifyContent:'space-between', marginBottom:8, paddingHorizontal:4 },
-        statBox: { flex:1, padding:8, borderRadius:10, marginRight:8, alignItems:'center' },
+    statusChip: { paddingHorizontal:10, paddingVertical:4, borderRadius:12 },
+    searchWrapper: { flexDirection:'row', alignItems:'center', borderWidth:1, borderRadius:12, paddingHorizontal:12, paddingVertical:6, marginBottom:6 },
+    sectionHeader: { paddingHorizontal:4, paddingVertical:6 },
+    statsRow: { flexDirection:'row', justifyContent:'space-between', marginBottom:8, paddingHorizontal:4 },
+    statBox: { flex:1, padding:8, borderRadius:10, marginRight:8, alignItems:'center' },
 });
 
 // Small stat component

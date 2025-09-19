@@ -223,7 +223,8 @@ export const saveReservation = async (reservation: Omit<Reservation, 'id' | 'cre
       return v;
     };
 
-    const cleaned = sanitize(reservation);
+  const cleaned = sanitize(reservation);
+  if (!(cleaned as any).currency) (cleaned as any).currency = 'HNL';
   const data = { ...cleaned, createdAt: serverTimestamp(), createdAtClient: Date.now() } as any;
   const docRef = await addDoc(collection(db, 'reservations'), data);
   return docRef.id;
@@ -233,10 +234,18 @@ export const saveReservation = async (reservation: Omit<Reservation, 'id' | 'cre
   }
 };
 
+/**
+ * DEPRECATED: No usar para transiciones críticas (accept/start) porque no aplica validaciones de exclusividad.
+ * Mantener solo para cambios secundarios (ej: marcar 'completed' en migraciones puntuales) si fuera necesario.
+ * Si se intenta mover a 'confirmed' o 'in_progress' lanza error para forzar uso de flujo nuevo.
+ */
 export const updateReservationStatus = async (reservationId: string, status: Reservation['status']) => {
-    try {
-      await updateDoc(doc(db, 'reservations', reservationId), { status });
-    } catch (err) {
+  if (['confirmed','in_progress'].includes(status as string)) {
+    throw new Error('updateReservationStatus deprecated: usa acceptReservationExclusive/startService');
+  }
+  try {
+    await updateDoc(doc(db, 'reservations', reservationId), { status, updatedAt: serverTimestamp() });
+  } catch (err) {
     console.error('updateReservationStatus error', err);
     throw err;
   }
@@ -329,7 +338,8 @@ export const saveService = async (service: Omit<Service, 'id' | 'createdAt'>) =>
       return v;
     };
 
-    const cleaned = sanitize(service) || {};
+  const cleaned = sanitize(service) || {};
+  if (!(cleaned as any).currency) (cleaned as any).currency = 'HNL';
     const data = { ...cleaned, createdAt: serverTimestamp(), createdAtClient: Date.now() } as any;
   const docRef = await addDoc(collection(db, 'services'), data);
     return docRef.id;
@@ -606,7 +616,15 @@ export const cancelReservation = async (reservationId: string, reason?: string) 
   try {
     const payload: any = { status: 'cancelled', finalState: 'cancelled', updatedAt: serverTimestamp(), cancelledAt: serverTimestamp() };
     if (reason) payload.cancelReason = reason;
-    await updateDoc(doc(db, 'reservations', reservationId), payload);
+    const ref = doc(db, 'reservations', reservationId);
+    await updateDoc(ref, payload);
+    try {
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        const data: any = snap.data();
+        if (data.providerId) await clearActiveReservationForProvider(data.providerId, reservationId);
+      }
+    } catch(e){ console.warn('cancelReservation sentinel cleanup error', e); }
   } catch (err) {
     console.error('cancelReservation error', err);
     throw err;
@@ -632,6 +650,17 @@ export const cancelReservationAtomic = async (reservationId: string, reason?: st
       };
       if (reason) update.cancelReason = reason;
       tx.update(ref as any, update);
+      const providerId = data.providerId;
+      if (providerId) {
+        const userRef = doc(db, 'users', providerId);
+        const userSnap = await tx.get(userRef as any);
+        if (userSnap.exists()) {
+          const udata = userSnap.data() as any;
+          if (udata.activeReservationId === reservationId) {
+            tx.update(userRef as any, { activeReservationId: null, updatedAt: serverTimestamp() });
+          }
+        }
+      }
     });
   } catch (err) {
     console.error('cancelReservationAtomic error', err);
@@ -639,12 +668,86 @@ export const cancelReservationAtomic = async (reservationId: string, reason?: st
   }
 };
 
-export const acceptReservation = async (reservationId: string) => {
+/**
+ * DEPRECATED: acceptReservation saltaba directo a in_progress sin validar exclusividad.
+ * Dejar para compatibilidad; lanza error siempre para detectar usos residuales en UI.
+ */
+export const acceptReservation = async (_reservationId: string) => {
+  throw new Error('acceptReservation deprecated: usa acceptReservationExclusive');
+};
+
+// --- NUEVA LÓGICA DE EXCLUSIVIDAD ---
+// Un proveedor solo puede tener UNA reserva activa (status confirmed | in_progress) a la vez.
+// Guardamos un sentinel en users/{providerId}.activeReservationId.
+// Aceptar: transacción que verifica que la reserva está pending y que el proveedor no tiene otra.
+// Liberación: al completar o cancelar se limpia el sentinel si coincide.
+
+export const acceptReservationExclusive = async (reservationId: string, providerId: string) => {
+  
+    await runTransaction(db, async (tx) => {
+      const resRef = doc(db, 'reservations', reservationId);
+      const userRef = doc(db, 'users', providerId);
+      const resSnap = await tx.get(resRef as any);
+      if (!resSnap.exists()) throw new Error('Reserva no encontrada');
+      const resData = resSnap.data() as any;
+      const currentStatus = resData.status || 'pending';
+      if (currentStatus !== 'pending') throw new Error('La reserva ya no está pendiente');
+      const alreadyAssigned = resData.providerId && resData.providerId !== providerId;
+      if (alreadyAssigned) throw new Error('La reserva fue asignada a otro proveedor');
+
+      const userSnap = await tx.get(userRef as any);
+      const userData = userSnap.exists() ? (userSnap.data() as any) : {};
+      const activeReservationId = userData.activeReservationId || null;
+      if (activeReservationId && activeReservationId !== reservationId) {
+        throw new Error('Ya tienes otra reserva activa. Debes finalizarla o cancelarla antes de aceptar una nueva.');
+      }
+
+      // Actualizar reserva -> confirmed (flujo: luego proveedor presiona "Iniciar" para in_progress)
+      tx.update(resRef as any, {
+        providerId,
+        status: 'confirmed',
+        assignedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      // Crear / actualizar perfil de usuario con sentinel
+      if (userSnap.exists()) {
+        tx.update(userRef as any, { activeReservationId: reservationId, providerActiveAssignedAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      } else {
+        tx.set(userRef as any, { activeReservationId: reservationId, providerActiveAssignedAt: serverTimestamp(), createdAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true });
+      }
+
+      // Notificación al cliente
+      const clientId = resData.userId || null;
+      if (clientId) {
+        tx.set(doc(collection(db, 'notifications')), {
+          to: clientId,
+          title: 'Tu servicio fue aceptado',
+            body: 'Un proveedor aceptó tu servicio.',
+          data: { reservationId, providerId },
+          read: false,
+          createdAt: serverTimestamp(),
+        } as any);
+      }
+    });
+  
+};
+
+// Limpia el sentinel si todavía apunta a esa reserva (se usa al completar/cancelar)
+export const clearActiveReservationForProvider = async (providerId: string, reservationId: string) => {
+  if (!providerId) return;
   try {
-    await updateDoc(doc(db, 'reservations', reservationId), { status: 'in_progress', updatedAt: serverTimestamp() });
-  } catch (err) {
-    console.error('acceptReservation error', err);
-    throw err;
+    await runTransaction(db, async (tx) => {
+      const userRef = doc(db, 'users', providerId);
+      const snap = await tx.get(userRef as any);
+      if (!snap.exists()) return; // nada que limpiar
+      const data = snap.data() as any;
+      if (data.activeReservationId === reservationId) {
+        tx.update(userRef as any, { activeReservationId: null, updatedAt: serverTimestamp() });
+      }
+    });
+  } catch (e) {
+    console.warn('clearActiveReservationForProvider error', e);
   }
 };
 
@@ -740,6 +843,8 @@ export const finishService = async (reservationId: string, providerId: string) =
     const data = snap.data() as any;
     if (data.providerId !== providerId) throw new Error('Not assigned provider');
     await updateDoc(ref, { status: 'completed', finalState: 'completed', finishedAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    // Liberar sentinel si corresponde (proveedor marcó como finalizado antes de confirmación del cliente)
+    try { await clearActiveReservationForProvider(providerId, reservationId); } catch(e){ console.warn('finishService clear sentinel', e); }
     // notify client that service finished (client should confirm and pay)
     const clientId = data.userId || null;
     if (clientId) {
@@ -770,7 +875,15 @@ export const confirmCompletion = async (reservationId: string, options?: { payme
     } else if (options?.paymentMethod === 'card') {
       payload.paymentStatus = 'paid';
     }
-    await updateDoc(doc(db, 'reservations', reservationId), payload);
+    const ref = doc(db, 'reservations', reservationId);
+    await updateDoc(ref, payload);
+    try {
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        const data: any = snap.data();
+        if (data.providerId) await clearActiveReservationForProvider(data.providerId, reservationId);
+      }
+    } catch(e){ console.warn('confirmCompletion clear sentinel', e); }
   } catch (err) {
     console.error('confirmCompletion error', err);
     throw err;
@@ -822,6 +935,20 @@ export const updateReservation = async (reservationId: string, updates: Partial<
   }
 };
 
+// Obtener una reserva puntual (lectura única)
+export const getReservationById = async (reservationId: string): Promise<Reservation | null> => {
+  try {
+    if (!reservationId) return null;
+    const ref = doc(db, 'reservations', reservationId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...(snap.data() as Reservation) };
+  } catch (err) {
+    console.error('getReservationById error', err);
+    throw err;
+  }
+};
+
 const defaultExport = {
   saveReservation,
   getReservationsForUser,
@@ -844,6 +971,11 @@ const defaultExport = {
   cancelReservation,
   cancelReservationAtomic,
   acceptReservation,
+  acceptReservationExclusive,
+  clearActiveReservationForProvider,
+  confirmCompletion,
+  saveRating,
+  sendInAppNotification,
   // threads
   getOrCreateThread,
   sendThreadMessage,
@@ -851,6 +983,7 @@ const defaultExport = {
   appendReservationEvent,
   listThreadsForUser,
   listenThreadMessages,
+  getReservationById,
 };
 
 export default defaultExport;
