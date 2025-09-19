@@ -1,5 +1,38 @@
 This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
 
+# Marca: Solvi
+
+**Nombre:** Solvi  
+**Slogan:** *"Resolvemos en minutos"*
+
+Solvi conecta usuarios con proveedores de servicios locales (plomería, electricidad, limpieza y más) de forma rápida. Enfoque: experiencia inmediata, transparencia en tarifas (Lempiras - HNL) y ciclo de vida claro de la reserva (pending → confirmed → in_progress → completed/cancelled).
+
+## Propuesta de valor
+- Búsqueda y reserva simplificada de servicios cotidianos
+- Tarifas claras con desglose de comisión según método de pago (efectivo vs tarjeta)
+- Exclusividad de servicio activo por proveedor (transacción Firestore) evitando overbooking
+- Historial con resumen final, motivo de cancelación y estados terminales persistentes
+- Preparado para reactivar tracking en vivo del proveedor (actualmente deshabilitado por privacidad)
+
+## Elementos de branding in-app
+| Elemento | Archivo / Implementación |
+|----------|-------------------------|
+| Banner de marca | `src/components/BrandingBanner.tsx` (Login y Home) |
+| Constantes de marca | `src/branding.ts` (`APP_NAME`, `TAGLINE`, `SHARE_MESSAGE`) |
+| Botón Compartir | Header de Home (usa `Share.share`) |
+| Rating Prompt | `src/services/ratingPrompt.ts` (etapas: 3 y 10 reservas completadas) |
+
+## Compartir la app
+Mensaje base (`SHARE_MESSAGE`):
+
+```
+Solvi - Resolvemos en minutos. Descubre cómo simplificamos tus servicios diarios. Descarga próximamente: https://example.com/solvi
+```
+
+> Reemplazar la URL cuando exista enlace oficial de tienda.
+
+---
+
 # Getting Started
 
 > **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.

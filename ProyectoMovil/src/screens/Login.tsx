@@ -1,5 +1,6 @@
 import React, { useState, useRef } from "react";
 import { Alert, StyleSheet, View, Animated, Text, Pressable, ActivityIndicator, ScrollView, Dimensions, Switch, Modal, FlatList, TouchableOpacity } from "react-native";
+import BrandingBanner from '../components/BrandingBanner';
 import CustomButton from "../components/CustomButton";
 import CustomInput from "../components/CustomInput";
 import { useAuth } from "../contexts/AuthContext";
@@ -100,8 +101,8 @@ export default function Login({ navigation }: any) {
     return (
         <View style={[styles.container, { backgroundColor: colors.background }] }>
             <Animated.View style={[styles.chooserCard, { opacity: chooserOpacity, transform: [{ scale: chooserScale }], backgroundColor: 'transparent' }]}> 
-                <Text style={[styles.title, { color: colors.text }]}>Bienvenido</Text>
-                <Text style={[styles.subtitle, { color: colors.muted }]}>Accede a tu cuenta o crea una nueva</Text>
+                <BrandingBanner />
+                <Text style={[styles.subtitle, { color: colors.muted, marginTop: -4 }]}>Accede a tu cuenta o crea una nueva</Text>
                 <Pressable style={[styles.bigButton, { backgroundColor: colors.primary }]} onPress={() => showForm('login')}>
                     <Text style={styles.bigButtonText}>Iniciar sesión</Text>
                 </Pressable>

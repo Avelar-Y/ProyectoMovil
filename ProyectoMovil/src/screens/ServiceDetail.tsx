@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Image, TextInput, Alert, ActivityIndicator, ScrollView, TouchableOpacity, Platform } from 'react-native';
+import FeatureHint from '../components/FeatureHint';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../contexts/ThemeContext';
 import { useRefresh } from '../contexts/RefreshContext';
@@ -405,7 +406,10 @@ export default function ServiceDetail({ route, navigation }: any) {
                         }} variant="secondary" />
                     </View>
                 )}
-                <TouchableOpacity style={{ marginTop: 24, alignSelf: 'flex-start' }} onPress={() => navigation.navigate('ServiceReservations', { serviceId: service.id || service.key || service })}>
+                <View style={{ marginTop: 10 }}>
+                    <FeatureHint id="service_flow" title="¿Cómo funciona?" text="Selecciona fecha, agrega una nota y confirma. El proveedor aceptará y podrás seguir el estado en tiempo real." />
+                </View>
+                <TouchableOpacity style={{ marginTop: 8, alignSelf: 'flex-start' }} onPress={() => navigation.navigate('ServiceReservations', { serviceId: service.id || service.key || service })}>
                     <Text style={{ color: colors.primary }}>Ver reservas relacionadas {loadingReservations ? '...' : `(${reservations.length})`}</Text>
                 </TouchableOpacity>
                 </ScrollView>

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, TextInput, Alert } from 'react-native';
+import FeatureHint from '../components/FeatureHint';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -255,6 +256,7 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
           <ScrollView contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
             <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>{reservation.serviceSnapshot?.title || 'Servicio'}</Text>
             <Text style={{ color: colors.muted, fontSize: 12 }}>ID: {reservation.id}</Text>
+            <FeatureHint id="reservation_status" title="Estados" text="Tu reserva avanza: pendiente → confirmada → en curso → completada. Puedes editar o cancelar mientras esté pendiente o confirmada." />
             {typeof reservation.serviceSnapshot?.price !== 'undefined' && (
               <Text style={{ color: colors.text, fontWeight: '700', marginTop: 4 }}>${reservation.serviceSnapshot.price}</Text>
             )}

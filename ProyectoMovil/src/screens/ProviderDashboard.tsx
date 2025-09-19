@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, Alert, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, Alert, ActivityIndicator, ScrollView, RefreshControl } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -22,10 +22,11 @@ export default function ProviderDashboard() {
   const [activeReservationId, setActiveReservationId] = useState<string|null>(null);
   const [checkingActive, setCheckingActive] = useState(false);
 
-  const load = useCallback(async () => {
+  // Carga datos (services + reservas activas). silent evita spinner global (para pull-to-refresh)
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!user) return;
     try {
-      setLoading(true);
+      if (!opts?.silent) setLoading(true);
       const uid = (user as any).uid;
       // cargar perfil para sentinel
       try {
@@ -43,7 +44,7 @@ export default function ProviderDashboard() {
     } catch (e) {
       console.warn('ProviderDashboard load error', e);
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
       setRefreshing(false);
     }
   }, [user]);
@@ -157,9 +158,16 @@ export default function ProviderDashboard() {
     <View style={[styles.container, { backgroundColor: colors.background }]}> 
       <View style={styles.headerRow}>
         <Text style={[styles.title, { color: colors.text }]}>Panel Proveedor</Text>
-        <TouchableOpacity onPress={() => setModalVisible(true)} style={[styles.createBtn, { backgroundColor: colors.primary }]}> 
-          <Text style={{ color:'#fff', fontWeight:'600', fontSize:13 }}>Crear servicio</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection:'row', gap:8 }}>
+          <TouchableOpacity
+            onPress={() => { setRefreshing(true); load({ silent:true }); }}
+            style={[styles.createBtn, { backgroundColor: colors.highlight }]}> 
+            <Text style={{ color: colors.text, fontWeight:'600', fontSize:13 }}>Refrescar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setModalVisible(true)} style={[styles.createBtn, { backgroundColor: colors.primary }]}> 
+            <Text style={{ color:'#fff', fontWeight:'600', fontSize:13 }}>Crear</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {loading ? (
@@ -167,7 +175,15 @@ export default function ProviderDashboard() {
           <ActivityIndicator color={colors.primary} size="large" />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom:60 }}>
+        <ScrollView
+          contentContainerStyle={{ paddingBottom:60 }}
+          refreshControl={<RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => { setRefreshing(true); load({ silent:true }); }}
+            colors={[colors.primary]}
+            tintColor={colors.primary}
+          />}
+        >
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Mis servicios</Text>
           {services.length===0 && <Text style={{ color: colors.muted, fontSize:12, marginBottom:8 }}>Aún no has creado servicios.</Text>}
           <FlatList data={services} keyExtractor={s=>s.id!} renderItem={renderService} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom:16 }} />

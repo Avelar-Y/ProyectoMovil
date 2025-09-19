@@ -1,16 +1,21 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, FlatList, Modal, Pressable, ActivityIndicator, TextInput, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, FlatList, Modal, Pressable, ActivityIndicator, TextInput, RefreshControl, Share, Platform, StatusBar } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Chip from '../components/Chip'; // mantenido por si se usa en otra parte (puede quitarse si ya no se necesita)
 import CategoryTabs from '../components/CategoryTabs';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useRefresh } from '../contexts/RefreshContext';
+import BrandingBanner from '../components/BrandingBanner';
+import { SHARE_MESSAGE } from '../branding';
+import FeatureHint from '../components/FeatureHint';
 
 // Home minimalista
 export default function Home({ navigation }: any) {
   const { user, logout } = useAuth();
   const { colors } = useTheme();
   const refreshCtx = useRefresh();
+  const insets = useSafeAreaInsets();
 
   const [query, setQuery] = useState('');
   const [services, setServices] = useState<any[]>([]);
@@ -86,60 +91,59 @@ export default function Home({ navigation }: any) {
     );
   }
 
+  // Altura segura superior combinando notch (iOS) o StatusBar (Android) para evitar que el banner se "pegue" arriba.
+  const topSafe = insets.top || (Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0);
+
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {/* Header minimal */}
-      <View style={styles.header}>
-        <View>
-          <Text style={[styles.welcome, { color: colors.muted }]}>Hola</Text>
-          <Text style={[styles.appName, { color: colors.text }]} numberOfLines={1}>{user?.email?.split('@')[0] || 'Usuario'}</Text>
-        </View>
-        <TouchableOpacity onPress={() => setShowProfile(true)}>
-          <Image source={{ uri: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.avatar} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Search */}
-      <View style={styles.searchBarWrapper}>
-        <View style={[styles.searchBar, { backgroundColor: colors.inputBg || colors.card, borderColor: colors.border }]}> 
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Buscar servicio"
-            placeholderTextColor={colors.muted}
-            style={[styles.searchInput, { color: colors.text }]}
-            returnKeyType="search"
-          />
-          {query.length > 0 && (
-            <TouchableOpacity onPress={() => setQuery('')}> 
-              <Text style={{ color: colors.muted, fontSize: 12 }}>Limpiar</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-
-      {/* Categories tabs */}
-      <CategoryTabs categories={categories} value={query} onChange={onSelectCategory} allowDeselect />
-
-      {/* Services list estable */}
-      <View style={{ flex:1 }}>
-        <FlatList
-          data={filtered}
-          keyExtractor={i => i.id}
-          renderItem={renderService}
-            contentContainerStyle={[styles.listContent, filtered.length === 0 && { flexGrow:1, justifyContent:'center' }]}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
-          keyboardShouldPersistTaps="handled"
-          ListEmptyComponent={
-            <View style={styles.emptyWrapper}> 
-              <Text style={{ color: colors.muted, marginBottom: 8 }}>No hay servicios que coincidan.</Text>
-              <TouchableOpacity onPress={() => setQuery('')}><Text style={{ color: colors.primary }}>Limpiar búsqueda</Text></TouchableOpacity>
+    <SafeAreaView style={{ flex:1, backgroundColor: colors.background }} edges={['top','left','right']}> 
+      <FlatList
+        data={filtered}
+        keyExtractor={i=>i.id}
+        renderItem={renderService}
+        ListHeaderComponent={
+          <View style={{ paddingTop: Math.max(10, topSafe * 0.3), paddingBottom:4 }}>
+            <View style={{ paddingHorizontal:20 }}>
+              <View style={styles.headerRow}> 
+                <BrandingBanner variant="minimal" compact hideTagline />
+                <TouchableOpacity onPress={() => setShowProfile(true)}>
+                  <Image source={{ uri: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' }} style={styles.avatar} />
+                </TouchableOpacity>
+              </View>
+              <Text style={[styles.tagline, { color: colors.muted }]}>Resolvemos en minutos</Text>
+              <View style={[styles.searchBar, { backgroundColor: colors.inputBg || colors.card, borderColor: colors.border, marginTop:10 }]}> 
+                <TextInput
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder="Buscar servicio"
+                  placeholderTextColor={colors.muted}
+                  style={[styles.searchInput, { color: colors.text }]}
+                  returnKeyType="search"
+                />
+                {query.length > 0 && (
+                  <TouchableOpacity onPress={() => setQuery('')}>
+                    <Text style={{ color: colors.muted, fontSize: 12 }}>Limpiar</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              <View style={{ marginTop:10 }}>
+                <CategoryTabs categories={categories} value={query} onChange={onSelectCategory} allowDeselect />
+              </View>
+              <View style={{ marginTop:10 }}>
+                <FeatureHint id="home_intro" title="Encuentra y reserva" text="Explora categorías o busca directamente. Toca un servicio para ver detalles y reservar en minutos." />
+              </View>
             </View>
-          }
-        />
-      </View>
-
-      {/* Profile modal */}
+          </View>
+        }
+        contentContainerStyle={[styles.listContent, filtered.length === 0 && { flexGrow:1, justifyContent:'center' }]}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+        keyboardShouldPersistTaps="handled"
+        ListEmptyComponent={
+          <View style={styles.emptyWrapper}> 
+            <Text style={{ color: colors.muted, marginBottom: 8 }}>No hay servicios que coincidan.</Text>
+            <TouchableOpacity onPress={() => setQuery('')}><Text style={{ color: colors.primary }}>Limpiar búsqueda</Text></TouchableOpacity>
+          </View>
+        }
+      />
       <Modal visible={showProfile} animationType="fade" transparent onRequestClose={() => setShowProfile(false)}>
         <Pressable style={styles.modalOverlay} onPress={() => setShowProfile(false)}>
           <View style={[styles.modalCard, { backgroundColor: colors.card }]}> 
@@ -154,13 +158,15 @@ export default function Home({ navigation }: any) {
           </View>
         </Pressable>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  header: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  headerRow: { flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
+  tagline: { fontSize:12, marginTop:4, fontWeight:'500', letterSpacing:0.3 },
+  shareBtn: { paddingVertical:6, paddingHorizontal:12, borderRadius:10 },
   welcome: { fontSize: 12, fontWeight: '500', letterSpacing: 0.5 },
   appName: { fontSize: 20, fontWeight: '700', maxWidth: 180 },
   avatar: { width: 40, height: 40, borderRadius: 20 },

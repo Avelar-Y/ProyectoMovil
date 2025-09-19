@@ -1,5 +1,6 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, SectionList, TouchableOpacity, TextInput } from 'react-native';
+import FeatureHint from '../components/FeatureHint';
 import { useTheme } from '../contexts/ThemeContext';
 // firestore namespaced import removed; use centralized service helpers instead
 import { useFocusEffect } from '@react-navigation/native';
@@ -14,6 +15,8 @@ export default function History({ navigation }: any) {
     const { user } = useAuth();
     const { colors } = useTheme();
     const [reservations, setReservations] = useState<any[]>([]);
+    // Mantiene la última lista conocida en memoria para evitar parpadeos / desapariciones
+    const lastKnownRef = useRef<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [isProvider, setIsProvider] = useState(false);
@@ -81,13 +84,44 @@ export default function History({ navigation }: any) {
         return { total, completed, cancelled, active };
     }, [reservations]);
 
+    // ---- Utilidades de caché serializable ----
+    const CACHE_KEY = 'historyLastReservations_v1';
+    const serializeForCache = (items: any[]) => {
+        return items.map(r => ({
+            id: r.id,
+            status: r.status,
+            service: r.service,
+            serviceSnapshot: r.serviceSnapshot?.title ? { title: r.serviceSnapshot.title } : undefined,
+            name: r.name,
+            date: r.date,
+            note: r.note,
+            cancelReason: r.cancelReason,
+            createdAt: r.createdAt?.toDate ? r.createdAt.toDate().toISOString() : r.createdAt
+        }));
+    };
+    const restoreCache = async () => {
+        try {
+            const raw = await AsyncStorage.getItem(CACHE_KEY);
+            if (!raw) return;
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                lastKnownRef.current = parsed;
+                // Solo hidratar si todavía no hay datos (evita sobrescribir algo ya cargado en caliente)
+                setReservations(prev => (prev.length === 0 ? parsed : prev));
+            }
+        } catch (e) { /* ignore */ }
+    };
+    const persistCache = async (items: any[]) => {
+        try { await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(serializeForCache(items))); } catch(_){}
+    };
+
+    // Carga inicial (restaura caché inmediatamente y luego revalida)
     useEffect(() => {
         let mounted = true;
         (async () => {
-            if (!user) {
-                if (mounted) setLoading(false);
-                return;
-            }
+            if (!user) { setLoading(false); return; }
+            // Restaura lista cached para evitar flash vacío
+            await restoreCache();
             try {
                 const uid = (user as any).uid;
                 const profile = await getUserProfile(uid);
@@ -95,37 +129,30 @@ export default function History({ navigation }: any) {
                 const provider = profile?.role === 'provider';
                 setIsProvider(provider);
 
-                let unsub = () => {};
                 if (provider) {
-                    // provider: load once on mount (no realtime) via service helper
                     try {
                         const items = await getReservationsByProvider(uid);
-                        setReservations(items);
-                        setLoading(false);
-                    } catch (e) {
-                        console.warn('provider reservations load failed', e);
-                        setLoading(false);
-                    }
+                        if (!mounted) return;
+                        setReservations(prev => (prev.length === 0 || items.length > 0 ? items : prev));
+                        lastKnownRef.current = items;
+                        persistCache(items);
+                    } catch (e) { console.warn('provider reservations load failed', e); }
                 } else {
-                    // regular user: existing behavior
                     try {
                         const res = await getReservationsForUser(user.email!);
-                        setReservations(res);
-                        setLoading(false);
-                    } catch (err) {
-                        console.warn('Fallback getReservationsForUser failed', err);
-                        setLoading(false);
-                    }
+                        if (!mounted) return;
+                        setReservations(prev => (prev.length === 0 || res.length > 0 ? res : prev));
+                        lastKnownRef.current = res;
+                        persistCache(res);
+                    } catch (err) { console.warn('Fallback getReservationsForUser failed', err); }
                 }
-
-                // cleanup will be handled by the return below
-                return () => { try { if (typeof unsub === 'function') unsub(); } catch(_){} };
             } catch (e) {
                 console.warn('History useEffect error', e);
+            } finally {
                 if (mounted) setLoading(false);
             }
         })();
-        return () => { mounted = false };
+        return () => { mounted = false; };
     }, [user]);
 
     // register global refresh handler
@@ -140,9 +167,13 @@ export default function History({ navigation }: any) {
             if (provider) {
                 const items = await getReservationsByProvider(uid);
                 setReservations(items);
+                lastKnownRef.current = items;
+                persistCache(items);
             } else {
                 const res = await getReservationsForUser(user.email!);
                 setReservations(res);
+                lastKnownRef.current = res;
+                persistCache(res);
             }
         } catch (e) { console.warn('History global refresh failed', e); }
     }, [user]);
@@ -158,17 +189,24 @@ export default function History({ navigation }: any) {
             const load = async () => {
                 if (!user) return;
                 try {
-                    // Revalidar rol rápido para evitar parpadeo cuando se vuelve a la pestaña
                     const uid = (user as any).uid;
                     const profile = await getUserProfile(uid).catch(()=>null);
                     const provider = profile?.role === 'provider';
                     if (mounted) setIsProvider(provider);
                     if (provider) {
                         const docs = await getReservationsByProvider(uid);
-                        if (mounted) setReservations(docs);
+                        if (mounted) {
+                            setReservations(prev => (prev.length === 0 || docs.length > 0 ? docs : prev));
+                            lastKnownRef.current = docs;
+                            persistCache(docs);
+                        }
                     } else if (user.email) {
                         const res = await getReservationsForUser(user.email);
-                        if (mounted) setReservations(res);
+                        if (mounted) {
+                            setReservations(prev => (prev.length === 0 || res.length > 0 ? res : prev));
+                            lastKnownRef.current = res;
+                            persistCache(res);
+                        }
                     }
                 } catch (err) {
                     console.warn('History focus load error', err);
@@ -182,6 +220,7 @@ export default function History({ navigation }: any) {
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
             <Text style={[styles.title, { color: colors.text }]}>{isProvider ? 'Historial de servicios' : 'Historial de reservas'}</Text>
+            <FeatureHint id="history_filters" title="Filtra y analiza" text="Usa las etiquetas para filtrar estados, busca por texto y revisa estadísticas rápidas para entender tu actividad." />
                         {loading ? <Text style={{ color: colors.muted }}>Cargando...</Text> : (
                             <>
                                 {/* Search bar for history */}
@@ -243,11 +282,15 @@ export default function History({ navigation }: any) {
                                                     if (uid) {
                                                         const docs = await getReservationsByProvider(uid);
                                                         setReservations(docs);
+                                                        lastKnownRef.current = docs;
+                                                        persistCache(docs);
                                                     }
                                                 } else {
                                                     if (!user?.email) return;
                                                     const res = await getReservationsForUser(user.email);
                                                     setReservations(res);
+                                                    lastKnownRef.current = res;
+                                                    persistCache(res);
                                                 }
                                             } catch (err) { console.warn('refresh error', err); } finally { setRefreshing(false); }
                                         }}
