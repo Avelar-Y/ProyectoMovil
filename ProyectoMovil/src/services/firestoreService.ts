@@ -22,6 +22,161 @@ import { geocodeAddressHybrid, computeAddressHash } from './geocodingService';
 
 const db = getFirestore();
 
+// ===================== LEDGER / TRANSACCIONES FINANCIERAS =====================
+// Enfoque Option B (ledger completo) seleccionado.
+// Creamos documentos en collection 'transactions' por cada reserva pagada (card o cash).
+// Idempotencia basada en reservationId + type ('service_payment').
+// Esto permitirá reportes de ingresos (provider) y egresos (cliente) sin recalcular.
+
+export interface Transaction {
+  id?: string;
+  reservationId: string;              // referencia lógica a la reserva
+  type: 'service_payment';            // para extensibilidad futura
+  method: 'card' | 'cash';
+  currency: string;                   // 'HNL'
+  amountClientPaid: number;           // total pagado por cliente (breakdown.total)
+  providerReceives: number;           // base (price del servicio)
+  bookingFee?: number;                // comisión fija
+  processingPercent?: number;         // % aplicado (solo card)
+  processingAmount?: number;          // monto de comisión %
+  base: number;                       // precio listado (subtotal)
+  createdAt?: FirebaseFirestoreTypes.Timestamp | null;
+  createdAtClient?: number;
+  providerId?: string | null;
+  clientId?: string | null;
+  serviceId?: string | null;
+  serviceTitle?: string | null;
+  // snapshot redundante para queries offline / integridad histórica
+  snapshot?: any;
+}
+
+/**
+ * Crea (si no existe) una transacción de pago para una reserva ya marcada como paid.
+ * Idempotente: si existe un doc con reservationId + type, retorna sin duplicar.
+ * Se ejecuta fuera de la transacción principal porque es derivado (eventual consistency aceptable).
+ */
+export const ensureTransactionForPaidReservation = async (reservationId: string) => {
+  if (!reservationId) return;
+  try {
+    const resRef = doc(db, 'reservations', reservationId);
+    const resSnap = await getDoc(resRef);
+    if (!resSnap.exists()) return;
+    const data: any = resSnap.data();
+    const paymentStatus = data.paymentStatus || 'unpaid';
+    if (paymentStatus !== 'paid') return; // Solo crear si realmente está pagada
+
+    const method: 'card' | 'cash' = (data.paymentMethod === 'card') ? 'card' : 'cash';
+    const breakdown = data.paymentBreakdown || {};
+    const base = +((breakdown.base ?? data.amount ?? data.serviceSnapshot?.price) || 0);
+    const total = +((breakdown.total ?? base) || 0);
+    const providerReceives = +((breakdown.providerReceives ?? base) || 0);
+    const bookingFee = typeof breakdown.bookingFee === 'number' ? +breakdown.bookingFee : undefined;
+    const processingPercent = typeof breakdown.processingPercent === 'number' ? +breakdown.processingPercent : undefined;
+    const processingAmount = typeof breakdown.processingAmount === 'number' ? +breakdown.processingAmount : undefined;
+    const currency = breakdown.currency || data.currency || 'HNL';
+
+    // Idempotencia: buscar si ya existe
+    const qExisting = query(collection(db, 'transactions'), where('reservationId', '==', reservationId), where('type', '==', 'service_payment'));
+    const existingSnap = await getDocs(qExisting);
+    if (!existingSnap.empty) return; // ya existe
+
+    const txDoc: Transaction = {
+      reservationId,
+      type: 'service_payment',
+      method,
+      currency,
+      amountClientPaid: total,
+      providerReceives,
+      bookingFee,
+      processingPercent,
+      processingAmount,
+      base,
+      createdAt: serverTimestamp() as any,
+      createdAtClient: Date.now(),
+      providerId: data.providerId || null,
+      clientId: data.userId || null,
+      serviceId: data.service || data.serviceSnapshot?.id || null,
+      serviceTitle: data.serviceSnapshot?.title || null,
+      snapshot: {
+        paymentStatus,
+        paymentMethod: method,
+        paymentBreakdown: breakdown,
+        status: data.status,
+        finalState: data.finalState,
+      },
+    };
+    await addDoc(collection(db, 'transactions'), txDoc as any);
+  } catch (e) {
+    console.warn('ensureTransactionForPaidReservation error', e);
+  }
+};
+
+// Listar transacciones para un proveedor (paginable por createdAtClient si se requiere)
+export const listTransactionsForProvider = async (providerId: string, limitN = 50): Promise<Transaction[]> => {
+  if (!providerId) return [];
+  try {
+    const qRef = query(collection(db, 'transactions'), where('providerId', '==', providerId), orderBy('createdAtClient', 'desc'), limitFn(limitN));
+    const snap = await getDocs(qRef as any);
+    return snap.docs.map((d: any) => ({ id: d.id, ...(d.data() as Transaction) }));
+  } catch (e) {
+    console.warn('listTransactionsForProvider error', e); return [];
+  }
+};
+
+export const listTransactionsForClient = async (clientId: string, limitN = 50): Promise<Transaction[]> => {
+  if (!clientId) return [];
+  try {
+    const qRef = query(collection(db, 'transactions'), where('clientId', '==', clientId), orderBy('createdAtClient', 'desc'), limitFn(limitN));
+    const snap = await getDocs(qRef as any);
+    return snap.docs.map((d: any) => ({ id: d.id, ...(d.data() as Transaction) }));
+  } catch (e) {
+    console.warn('listTransactionsForClient error', e); return [];
+  }
+};
+
+// Agregados simples en cliente (para dataset pequeño). Para volúmenes grandes mover a Cloud Function / BigQuery.
+export const aggregateProviderStats = async (providerId: string, period?: { fromTs?: number; toTs?: number }) => {
+  const txs = await listTransactionsForProvider(providerId, 500); // límite razonable temporal
+  const filtered = txs.filter(t => {
+    const ts = (t as any).createdAtClient || 0;
+    if (period?.fromTs && ts < period.fromTs) return false;
+    if (period?.toTs && ts > period.toTs) return false;
+    return true;
+  });
+  let gross = 0, providerTotal = 0, bookingFees = 0, processing = 0;
+  for (const t of filtered) {
+    gross += t.amountClientPaid || 0;
+    providerTotal += t.providerReceives || 0;
+    bookingFees += t.bookingFee || 0;
+    processing += t.processingAmount || 0;
+  }
+  return {
+    count: filtered.length,
+    gross: +gross.toFixed(2),
+    providerReceives: +providerTotal.toFixed(2),
+    bookingFees: +bookingFees.toFixed(2),
+    processingFees: +processing.toFixed(2),
+    netToApp: +(bookingFees + processing).toFixed(2),
+  };
+};
+
+export const aggregateClientStats = async (clientId: string, period?: { fromTs?: number; toTs?: number }) => {
+  const txs = await listTransactionsForClient(clientId, 500);
+  const filtered = txs.filter(t => {
+    const ts = (t as any).createdAtClient || 0;
+    if (period?.fromTs && ts < period.fromTs) return false;
+    if (period?.toTs && ts > period.toTs) return false;
+    return true;
+  });
+  let spent = 0;
+  for (const t of filtered) spent += t.amountClientPaid || 0;
+  return {
+    count: filtered.length,
+    totalSpent: +spent.toFixed(2),
+    avgTicket: filtered.length ? +(spent / filtered.length).toFixed(2) : 0,
+  };
+};
+
 // ===================== THREADS (Conversaciones unificadas cliente <-> proveedor) =====================
 // Un thread representa un único canal entre dos usuarios (participants: [uidA, uidB])
 // Los mensajes se guardan en threads/{threadId}/messages
@@ -866,24 +1021,52 @@ export const finishService = async (reservationId: string, providerId: string) =
 // Client confirms completion and optionally pays
 export const confirmCompletion = async (reservationId: string, options?: { paymentInfo?: any; paymentMethod?: 'card' | 'cash'; breakdown?: any; markPaid?: boolean }) => {
   try {
-    const payload: any = { status: 'completed', finalState: 'completed', updatedAt: serverTimestamp() };
-    if (options?.paymentInfo) payload.paymentInfo = options.paymentInfo;
-    if (options?.paymentMethod) payload.paymentMethod = options.paymentMethod;
-    if (options?.breakdown) payload.paymentBreakdown = options.breakdown;
-    if (options?.paymentMethod === 'cash') {
-      payload.paymentStatus = options.markPaid ? 'paid' : 'pending';
-    } else if (options?.paymentMethod === 'card') {
-      payload.paymentStatus = 'paid';
-    }
     const ref = doc(db, 'reservations', reservationId);
-    await updateDoc(ref, payload);
-    try {
-      const snap = await getDoc(ref);
-      if (snap.exists()) {
-        const data: any = snap.data();
-        if (data.providerId) await clearActiveReservationForProvider(data.providerId, reservationId);
+    let providerId: string | null = null;
+    let updated = false;
+    let becamePaid = false; // bandera para crear transacción luego
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref as any);
+      if (!snap.exists()) throw new Error('Reservation not found');
+      const data = snap.data() as any;
+      providerId = data.providerId || null;
+      const currentPaymentStatus = data.paymentStatus || 'unpaid';
+      const currentStatus = data.status || 'pending';
+      // Idempotencia: si ya está pagado no hacemos nada.
+      if (currentPaymentStatus === 'paid') {
+        return; // nada que modificar
       }
-    } catch(e){ console.warn('confirmCompletion clear sentinel', e); }
+      const update: any = { updatedAt: serverTimestamp() };
+      // Si aún no está marcada como completada, marcarla.
+      if (currentStatus !== 'completed') {
+        update.status = 'completed';
+      }
+      update.finalState = 'completed';
+      if (options?.paymentInfo) update.paymentInfo = options.paymentInfo;
+      if (options?.paymentMethod) update.paymentMethod = options.paymentMethod;
+      if (options?.breakdown) update.paymentBreakdown = options.breakdown;
+      if (options?.paymentMethod === 'cash') {
+        // cash puede quedar pendiente a menos que explícitamente se marque pagado
+        update.paymentStatus = options.markPaid ? 'paid' : 'pending';
+        if (options.markPaid) becamePaid = true;
+      } else if (options?.paymentMethod === 'card') {
+        update.paymentStatus = 'paid';
+        becamePaid = true;
+      } else if (!options?.paymentMethod && !data.paymentMethod) {
+        // fallback: si no se envía método, mantener o establecer unpaid
+        update.paymentStatus = currentPaymentStatus;
+      }
+      tx.update(ref as any, update);
+      updated = true;
+    });
+    // Limpiar sentinel sólo si actualizamos algo y se completó pago/estado
+    if (updated && providerId) {
+      try { await clearActiveReservationForProvider(providerId, reservationId); } catch (e) { console.warn('confirmCompletion clear sentinel', e); }
+    }
+    // Crear transacción si pasó a pagado
+    if (becamePaid) {
+      try { await ensureTransactionForPaidReservation(reservationId); } catch(e){ console.warn('ledger creation (confirmCompletion)', e); }
+    }
   } catch (err) {
     console.error('confirmCompletion error', err);
     throw err;
@@ -949,6 +1132,33 @@ export const getReservationById = async (reservationId: string): Promise<Reserva
   }
 };
 
+// Transición para pagos en efectivo: pasar de pending -> paid de forma idempotente
+export const markCashPaymentAsPaid = async (reservationId: string, actorProviderId: string) => {
+  try {
+    let becamePaid = false;
+    await runTransaction(db, async (tx) => {
+      const ref = doc(db, 'reservations', reservationId);
+      const snap = await tx.get(ref as any);
+      if (!snap.exists()) throw new Error('Reservation not found');
+      const data = snap.data() as any;
+      if (data.providerId !== actorProviderId) throw new Error('No autorizado');
+      const method = data.paymentMethod || 'cash';
+      if (method !== 'cash') throw new Error('La reserva no es de efectivo');
+      const current = data.paymentStatus || 'unpaid';
+      if (current === 'paid') return; // idempotente
+      if (current !== 'pending' && current !== 'unpaid') throw new Error('Estado de pago inválido');
+      tx.update(ref as any, { paymentStatus: 'paid', updatedAt: serverTimestamp(), paidAt: serverTimestamp() });
+      becamePaid = true;
+    });
+    if (becamePaid) {
+      try { await ensureTransactionForPaidReservation(reservationId); } catch(e){ console.warn('ledger creation (cashPaid)', e); }
+    }
+  } catch (err) {
+    console.error('markCashPaymentAsPaid error', err);
+    throw err;
+  }
+};
+
 const defaultExport = {
   saveReservation,
   getReservationsForUser,
@@ -974,6 +1184,12 @@ const defaultExport = {
   acceptReservationExclusive,
   clearActiveReservationForProvider,
   confirmCompletion,
+  markCashPaymentAsPaid,
+  ensureTransactionForPaidReservation,
+  listTransactionsForProvider,
+  listTransactionsForClient,
+  aggregateProviderStats,
+  aggregateClientStats,
   saveRating,
   sendInAppNotification,
   // threads

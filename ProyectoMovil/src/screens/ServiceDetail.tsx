@@ -28,6 +28,7 @@ export default function ServiceDetail({ route, navigation }: any) {
     const [addressCollapsed, setAddressCollapsed] = useState(true);
     const [profile, setProfile] = useState<any | null>(null);
     const [serviceOwner, setServiceOwner] = useState<any | null>(null);
+    const [submitting, setSubmitting] = useState(false);
     const { user } = useAuth();
 
     useEffect(() => {
@@ -124,6 +125,7 @@ export default function ServiceDetail({ route, navigation }: any) {
     }, [serviceDetailHandler]);
 
     const handleReserve = async () => {
+        if (submitting) return; // evita doble click
         // Bloqueo inmediato si servicio no activo
         if (!service?.active) {
             Alert.alert('No disponible', 'Este servicio está inactivo y no se puede reservar.');
@@ -158,6 +160,7 @@ export default function ServiceDetail({ route, navigation }: any) {
             }
         }
         try {
+            setSubmitting(true);
             const serviceId = service?.id || service?.key || service;
             const amount = service?.price ?? undefined;
             const currency = 'USD';
@@ -191,7 +194,7 @@ export default function ServiceDetail({ route, navigation }: any) {
                 userEmail: user?.email ?? 'unknown',
                 userId: (user as any)?.uid,
                 service: serviceId,
-                serviceSnapshot: { id: service?.id, title: service?.title, price: service?.price },
+                serviceSnapshot: { id: service?.id, title: service?.title, price: service?.price, duration: service?.duration },
                 // include provider info with the reservation so chat/flows can reference it
                 providerId: service?.ownerId || serviceOwner?.uid || undefined,
                 providerPhone: service?.ownerPhone || serviceOwner?.phone || undefined,
@@ -248,6 +251,8 @@ export default function ServiceDetail({ route, navigation }: any) {
             navigation.goBack();
         } catch (err: any) {
             Alert.alert('Error', err.message || 'No se pudo guardar la reserva');
+        } finally {
+            setSubmitting(false);
         }
     }
 
@@ -414,9 +419,15 @@ export default function ServiceDetail({ route, navigation }: any) {
                 </TouchableOpacity>
                 </ScrollView>
                 <View style={styles.fabArea}>
-                    <CustomButton title={service.active ? "Reservar" : "Inactivo"} onPress={handleReserve} disabled={!service.active} />
+                    <CustomButton title={submitting ? 'Creando...' : (service.active ? "Reservar" : "Inactivo")} onPress={handleReserve} disabled={!service.active || submitting} />
                 </View>
             </View>
+            {submitting && (
+              <View style={styles.overlay}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <Text style={{ color: colors.text, marginTop:12, fontWeight:'600' }}>Creando reserva...</Text>
+              </View>
+            )}
         </View>
     );
 }
@@ -460,5 +471,6 @@ const styles = StyleSheet.create({
     sectionTitle: { fontWeight: '700', marginBottom: 8 },
     addressSummary: { padding:12, borderRadius:10, borderWidth:1, marginBottom:8 },
     fabArea: { position:'absolute', left:0, right:0, bottom:0, padding:16, borderTopWidth:StyleSheet.hairlineWidth, borderColor:'rgba(0,0,0,0.1)' }
+    ,overlay:{ position:'absolute', top:0, left:0, right:0, bottom:0, backgroundColor:'rgba(0,0,0,0.35)', alignItems:'center', justifyContent:'center' }
 });
  

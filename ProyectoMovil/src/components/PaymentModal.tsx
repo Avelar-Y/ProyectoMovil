@@ -9,22 +9,42 @@ interface CardMeta { id: string; brand: string; last4: string; expMonth: number;
 interface Props {
   visible: boolean;
   onClose: () => void;
-  price: number; // base price (service subtotal)
+  price: number; // base price (service subtotal) en la moneda indicada
   cards: CardMeta[];
   defaultMethod?: 'card' | 'cash';
   onConfirm: (data: { method: 'card' | 'cash'; cardId?: string; breakdown: PaymentBreakdown }) => Promise<void> | void;
   loading?: boolean;
+  currency?: string; // ISO code (default HNL)
+  currencySymbol?: string; // símbolo mostrado (default 'L')
 }
 
-export default function PaymentModal({ visible, onClose, price, cards, defaultMethod='card', onConfirm, loading }: Props) {
+export default function PaymentModal({ visible, onClose, price, cards, defaultMethod='card', onConfirm, loading, currency='HNL', currencySymbol='L' }: Props) {
   const { colors } = useTheme();
   const [method, setMethod] = useState<'card'|'cash'>(defaultMethod);
   const [cardId, setCardId] = useState<string | undefined>(cards[0]?.id);
+  const [submitting, setSubmitting] = useState(false); // previene múltiples confirmaciones rápidas
   const breakdown = computePaymentBreakdown(price || 0, method);
+  // Helper formato simple. (Si se requiere internacionalización posterior se sustituye por Intl.NumberFormat)
+  const fmt = (v:number) => `${currencySymbol} ${v.toFixed(2)}`;
   useEffect(()=>{ if (cards.length && !cardId) setCardId(cards[0].id); }, [cards.length]);
 
+  // Reset interno cuando se abre/cierra
+  useEffect(() => {
+    if (!visible) {
+      setSubmitting(false);
+      return;
+    }
+  }, [visible]);
+
   const confirm = async () => {
-    await onConfirm({ method, cardId: method === 'card' ? cardId : undefined, breakdown });
+    if (loading || submitting) return; // ya en curso
+    setSubmitting(true);
+    try {
+      await onConfirm({ method, cardId: method === 'card' ? cardId : undefined, breakdown });
+    } finally {
+      // No limpiamos inmediatamente si loading externo continúa; el padre controla cierre.
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -54,31 +74,31 @@ export default function PaymentModal({ visible, onClose, price, cards, defaultMe
             </View>
           )}
           <View style={{ marginTop:16 }}>
-            <Text style={{ color: colors.text, fontWeight:'700', marginBottom:6 }}>Desglose (HNL)</Text>
-            <Line label='Subtotal servicio' value={breakdown.base} color={colors.text} />
-            <Line label='Comisión reservación' value={breakdown.bookingFee} color={colors.muted} />
+            <Text style={{ color: colors.text, fontWeight:'700', marginBottom:6 }}>Desglose ({currency})</Text>
+            <Line label='Subtotal servicio' value={breakdown.base} color={colors.text} currencySymbol={currencySymbol} />
+            <Line label='Comisión reservación' value={breakdown.bookingFee} color={colors.muted} currencySymbol={currencySymbol} />
             {breakdown.processingPercent > 0 && (
-              <Line label={`Procesamiento (${breakdown.processingPercent}% )`} value={breakdown.processingAmount} color={colors.muted} />
+              <Line label={`Procesamiento (${breakdown.processingPercent}% )`} value={breakdown.processingAmount} color={colors.muted} currencySymbol={currencySymbol} />
             )}
-            <Line label='Total a pagar' value={breakdown.total} bold color={colors.text} />
-            <Line label='Proveedor recibe' value={breakdown.providerReceives} color={colors.muted} small />
+            <Line label='Total a pagar' value={breakdown.total} bold color={colors.text} currencySymbol={currencySymbol} />
+            <Line label='Proveedor recibe' value={breakdown.providerReceives} color={colors.muted} small currencySymbol={currencySymbol} />
           </View>
           <View style={{ flexDirection:'row', justifyContent:'flex-end', marginTop:18 }}>
             <CustomButton title='Cancelar' onPress={onClose} variant='tertiary' />
-            <CustomButton title={loading? 'Procesando...' : 'Confirmar'} onPress={confirm} disabled={loading || (method==='card' && !cardId)} />
+            <CustomButton title={(loading||submitting)? 'Procesando...' : 'Confirmar'} onPress={confirm} disabled={loading || submitting || (method==='card' && !cardId)} />
           </View>
-          {loading && <ActivityIndicator style={{ marginTop:8 }} color={colors.primary} />}
+          {(loading || submitting) && <ActivityIndicator style={{ marginTop:8 }} color={colors.primary} />}
         </View>
       </View>
     </Modal>
   );
 }
 
-function Line({ label, value, color, bold, small }:{ label:string; value:number; color:string; bold?:boolean; small?:boolean }){
+function Line({ label, value, color, bold, small, currencySymbol='L' }:{ label:string; value:number; color:string; bold?:boolean; small?:boolean; currencySymbol?: string }){
   return (
     <View style={{ flexDirection:'row', justifyContent:'space-between', marginVertical:2 }}>
       <Text style={{ color, fontSize: small?10:12 }}>{label}</Text>
-      <Text style={{ color, fontWeight: bold? '700':'500', fontSize: small?10:12 }}>L {value.toFixed(2)}</Text>
+      <Text style={{ color, fontWeight: bold? '700':'500', fontSize: small?10:12 }}>{currencySymbol} {value.toFixed(2)}</Text>
     </View>
   );
 }

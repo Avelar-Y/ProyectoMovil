@@ -1,4 +1,6 @@
-import { APP_COMMISSION_PERCENT } from '@env';
+// Eliminamos dependencia dinámica y fijamos porcentaje de procesamiento al 5% solicitado.
+// Si se requiere parametrizar de nuevo, reintroducir lectura desde env.
+
 
 export interface PaymentBreakdown {
   currency: string;            // 'HNL'
@@ -21,8 +23,7 @@ const BOOKING_FEE_HNL = 5; // Comisión fija ejemplo (HNL). Ajustar según negoc
 
 export function computePaymentBreakdown(base: number, method: 'card' | 'cash'): PaymentBreakdown {
   const safeBase = +(base || 0).toFixed(2);
-  const pct = parseFloat(APP_COMMISSION_PERCENT || '0') || 0;
-  const processingPercent = method === 'card' ? pct : 0;
+  const processingPercent = method === 'card' ? 5 : 0; // 5% fijo
   const processingAmount = method === 'card' ? +(safeBase * processingPercent / 100).toFixed(2) : 0;
   const bookingFee = BOOKING_FEE_HNL; // siempre aplicada (puedes condicionar si sólo para efectivo)
   const total = +(safeBase + bookingFee + processingAmount).toFixed(2);

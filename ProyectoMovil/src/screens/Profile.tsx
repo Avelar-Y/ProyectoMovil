@@ -211,6 +211,7 @@ export default function Profile({ navigation }: any) {
                                 </View>
                             )}
                             <CustomButton title="Historial" onPress={() => navigation.navigate('History')} />
+                            <CustomButton title="Ver Finanzas" onPress={() => navigation.navigate(role === 'provider' ? 'ProviderFinanceDashboard' : 'ClientFinanceHistory')} variant='primary' />
                             <CustomButton title="Cerrar sesión" onPress={async () => { try { await logout(); } catch (e) { Alert.alert('Error', 'No se pudo cerrar sesión'); console.warn('logout failed', e); } }} variant="secondary" />
                         </View>
                         </View>

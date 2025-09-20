@@ -1,8 +1,8 @@
 // Servicio Firestore para almacenar métodos de pago (simples) por usuario.
+// Migrado a la API modular (getFirestore/collection/doc/addDoc) para evitar deprecaciones.
 // ADVERTENCIA: No almacenar PAN completo en producción. Use tokenización (Stripe, Braintree, etc.).
-// Adaptado al mismo patrón que firestoreService usando @react-native-firebase/firestore
-import firestore, { FirebaseFirestoreTypes } from '@react-native-firebase/firestore';
-const db = firestore();
+import { getFirestore, collection, doc, addDoc, getDocs, deleteDoc, serverTimestamp } from '@react-native-firebase/firestore';
+const db = getFirestore();
 
 export interface PaymentMethod {
   id?: string;
@@ -16,19 +16,20 @@ export interface PaymentMethod {
 
 export async function addPaymentMethod(userId: string, method: Omit<PaymentMethod,'id'|'createdAt'>) : Promise<string> {
   if (!userId) throw new Error('userId requerido');
-  const col = db.collection('users').doc(userId).collection('paymentMethods');
-  const ref = await col.add({ ...method, createdAt: firestore.FieldValue.serverTimestamp() });
+  const colRef = collection(db, 'users', userId, 'paymentMethods');
+  const ref = await addDoc(colRef, { ...method, createdAt: serverTimestamp() });
   return ref.id;
 }
 
 export async function listPaymentMethods(userId: string): Promise<PaymentMethod[]> {
   if (!userId) return [];
-  const col = db.collection('users').doc(userId).collection('paymentMethods');
-  const snap = await col.get();
+  const colRef = collection(db, 'users', userId, 'paymentMethods');
+  const snap = await getDocs(colRef as any);
   return snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
 }
 
 export async function removePaymentMethod(userId: string, methodId: string): Promise<void> {
   if (!userId || !methodId) return;
-  await db.collection('users').doc(userId).collection('paymentMethods').doc(methodId).delete();
+  const ref = doc(db, 'users', userId, 'paymentMethods', methodId);
+  await deleteDoc(ref as any);
 }

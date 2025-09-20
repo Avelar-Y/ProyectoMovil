@@ -9,6 +9,7 @@ import { useRefresh } from '../contexts/RefreshContext';
 import BrandingBanner from '../components/BrandingBanner';
 import { SHARE_MESSAGE } from '../branding';
 import FeatureHint from '../components/FeatureHint';
+import { formatMoney } from '../utils/currency';
 
 // Home minimalista
 export default function Home({ navigation }: any) {
@@ -76,7 +77,11 @@ export default function Home({ navigation }: any) {
         <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{item.title}</Text>
         {!!item.description && <Text style={[styles.cardDesc, { color: colors.muted }]} numberOfLines={1}>{item.description}</Text>}
         <View style={styles.metaRow}>
-          {item.price != null && <Text style={[styles.price, { color: colors.primary }]}>${item.price}</Text>}
+          {item.price != null && (
+            <Text style={[styles.price, { color: colors.primary }]}>
+              {formatMoney(item.price, { currency: item.raw.currency || 'HNL' })}
+            </Text>
+          )}
           {item.createdAtMillis && <Text style={[styles.date, { color: colors.muted }]}>{new Date(item.createdAtMillis).toLocaleDateString()}</Text>}
         </View>
       </View>

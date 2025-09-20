@@ -8,7 +8,8 @@
     "lint": "eslint .",
     "start": "react-native start",
     "test": "jest",
-    "seed": "node scripts/importFirestore.js --file data/seed-services.json --serviceAccount serviceAccount.json --merge"
+  "seed": "node scripts/importFirestore.js --file data/seed-services.json --serviceAccount serviceAccount.json --merge",
+  "seed:services": "node scripts/seedServices.js --serviceAccount serviceAccount.json --skipUnchanged"
   },
   "dependencies": {
     "@mapbox/polyline": "^1.2.1",

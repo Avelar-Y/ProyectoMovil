@@ -5,7 +5,7 @@ import MapView, { Marker, Polyline } from 'react-native-maps';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useRefresh } from '../contexts/RefreshContext';
-import { listenReservation, updateReservation, cancelReservationAtomic, getUserProfile, confirmCompletion, acceptReservationExclusive } from '../services/firestoreService';
+import { listenReservation, updateReservation, cancelReservationAtomic, getUserProfile, confirmCompletion, acceptReservationExclusive, finishService, markCashPaymentAsPaid } from '../services/firestoreService';
 import { geocodeAddressHybrid, computeAddressHash } from '../services/geocodingService';
 import { fetchRoute } from '../services/directionsService';
 import { GOOGLE_MAPS_API_KEY } from '@env';
@@ -116,6 +116,11 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
   const canAccept = isProvider && status === 'pending';
   const canCancelClient = !isProvider && status && ['pending','confirmed'].includes(status);
   const canChat = status && ['confirmed','in_progress'].includes(status);
+  const paymentStatus = reservation?.paymentStatus;
+  const paymentMethod = reservation?.paymentMethod;
+  // Mostrar botón cliente sólo mientras no se haya autorizado/pagado. Para cash: ocultar cuando queda en 'pending' tras confirmación.
+  const showClientAuthorizeButton = !isProvider && ['in_progress','completed'].includes(status || '') && paymentStatus !== 'paid' && !(paymentMethod==='cash' && paymentStatus==='pending');
+  const clientAuthorizeDisabled = status !== 'completed';
 
   const stateColor = (s?: string) => {
     switch(s){
@@ -169,24 +174,37 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
     } catch(e:any){ Alert.alert('Error', e?.message || 'No se pudo aceptar'); }
   };
 
-  const openFinishFlow = () => {
-    if (!reservationId || status !== 'in_progress') {
+  const openFinishFlow = async () => {
+    if (!reservationId) return;
+    if (status !== 'in_progress') {
       Alert.alert('Finalización','La reserva no está en progreso.');
       return;
     }
-    setShowPaymentModal(true);
+    // Proveedor marca finalizado (no cobra); el cliente luego autoriza.
+    try {
+      const uid = (user as any)?.uid;
+      if (!uid) throw new Error('No autenticado');
+      await finishService(reservationId, uid);
+      Alert.alert('Servicio','Marcado como finalizado. Esperando confirmación del cliente.');
+    } catch(e:any){
+      Alert.alert('Error', e?.message || 'No se pudo finalizar');
+    }
   };
 
   const handleConfirmPayment = async (data: { method:'card'|'cash'; cardId?: string; breakdown:any }) => {
     if (!reservationId) return;
     try {
       setFinalizing(true);
+      // Tomar monto base desde snapshot (asegurado en HNL). Fallback a 0.
+      const amountHNL = reservation?.serviceSnapshot?.price ?? reservation?.amount ?? 0;
       await confirmCompletion(reservationId, {
         paymentMethod: data.method,
-        paymentInfo: data.method==='card'? { cardId: data.cardId }: undefined,
-        breakdown: data.breakdown,
+        paymentInfo: data.method==='card'? { cardId: data.cardId, currency: 'HNL', amount: amountHNL } : { currency: 'HNL', amount: amountHNL },
+        breakdown: { ...data.breakdown, currency: 'HNL', amount: amountHNL },
         markPaid: data.method==='cash'? false : true,
       });
+      // Actualización optimista local (oculta botón inmediatamente)
+      setReservation((prev:any) => prev ? { ...prev, status: 'completed', finalState: 'completed', paymentStatus: data.method==='card' ? 'paid' : (prev.paymentStatus || (data.method==='cash' ? 'pending' : 'unpaid')), paymentMethod: data.method } : prev);
       setShowPaymentModal(false);
       Alert.alert('Reserva','Servicio marcado como completado');
       // Disparar refresco global para que dashboards/listas reflejen el cambio
@@ -256,6 +274,9 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
           <ScrollView contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
             <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>{reservation.serviceSnapshot?.title || 'Servicio'}</Text>
             <Text style={{ color: colors.muted, fontSize: 12 }}>ID: {reservation.id}</Text>
+            {typeof reservation.serviceSnapshot?.duration !== 'undefined' && (
+              <Text style={{ color: colors.muted, fontSize:12, marginTop:2 }}>Duración estimada: {reservation.serviceSnapshot.duration} min</Text>
+            )}
             <FeatureHint id="reservation_status" title="Estados" text="Tu reserva avanza: pendiente → confirmada → en curso → completada. Puedes editar o cancelar mientras esté pendiente o confirmada." />
             {typeof reservation.serviceSnapshot?.price !== 'undefined' && (
               <Text style={{ color: colors.text, fontWeight: '700', marginTop: 4 }}>${reservation.serviceSnapshot.price}</Text>
@@ -301,30 +322,32 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
               {/* Bloque de compartir ubicación deshabilitado temporalmente */}
               {!hasClientLocation && (
                 <View style={{ marginTop:12, padding:12, borderRadius:12, borderWidth:1, borderColor: colors.border, backgroundColor: colors.inputBg }}>
-                  <Text style={{ color: colors.text, fontWeight:'600', marginBottom:4 }}>Mapa / Ruta</Text>
+                  <Text style={{ color: colors.text, fontWeight:'600', marginBottom:4 }}>Ubicación del cliente</Text>
                   <Text style={{ color: colors.muted, fontSize:12, lineHeight:16 }}>
-                    Aún no se puede mostrar el mapa porque la reserva no tiene coordenadas de ubicación para el {providerLocation ? 'cliente' : 'proveedor'}{!providerLocation && !clientLocation ? ' ni el cliente' : ''}.
-                  </Text>
-                  <Text style={{ color: colors.muted, fontSize:12, marginTop:6 }}>
-                    Próximos pasos: implementar subida de localización en tiempo real o editar manualmente el documento en Firestore con campos providerLocation / clientLocation.
+                    Aún no se puede mostrar el mapa porque la reserva no tiene coordenadas del cliente.
                   </Text>
                   <TouchableOpacity
                     onPress={async () => {
                       if (!reservationId) return;
                       try {
-                        // Coordenadas de prueba (Centro de San Pedro Sula -> Mall Multiplaza)
-                        const testProvider = { lat: 15.5042, lng: -88.0250, updatedAt: new Date() };
-                        const testClient = { lat: 15.5086, lng: -88.0189, updatedAt: new Date() };
-                        await updateReservation(reservationId, { providerLocation: testProvider, clientLocation: testClient });
-                        Alert.alert('Agregado', 'Coordenadas de prueba insertadas. Se actualizará el mapa en unos segundos.');
+                        // Sólo coordenadas de cliente (prueba). Punto céntrico (ej. Plaza Tigo, SPS)
+                        const testClient = { lat: 15.5059, lng: -88.0219, updatedAt: new Date(), source: 'test_injected' };
+                        await updateReservation(reservationId, { clientLocation: testClient });
+                        Alert.alert('Listo', 'Coordenadas de prueba del cliente insertadas.');
                       } catch (e:any) {
-                        Alert.alert('Error', e?.message || 'No se pudo agregar coordenadas de prueba');
+                        Alert.alert('Error', e?.message || 'No se pudo insertar');
                       }
                     }}
                     style={{ marginTop:10, backgroundColor: colors.primary, paddingVertical:10, borderRadius:10, alignItems:'center' }}
                   >
-                    <Text style={{ color:'#fff', fontSize:13, fontWeight:'600' }}>Insertar coordenadas de prueba</Text>
+                    <Text style={{ color:'#fff', fontSize:13, fontWeight:'600' }}>Insertar coords cliente (prueba)</Text>
                   </TouchableOpacity>
+                </View>
+              )}
+              {hasClientLocation && (
+                <View style={{ marginTop:12, padding:10, borderRadius:10, borderWidth:1, borderColor: colors.border }}>
+                  <Text style={{ color: colors.text, fontWeight:'600', marginBottom:4 }}>Coordenadas cliente</Text>
+                  <Text style={{ color: colors.muted, fontSize:12 }}>Lat: {clientLocation?.lat.toFixed(5)}  Lng: {clientLocation?.lng.toFixed(5)}</Text>
                 </View>
               )}
               {editing && (
@@ -410,14 +433,53 @@ export default function ActiveReservationDetail({ route, navigation }: Props) {
             {isProvider && status==='in_progress' && (
               <View style={{ marginTop:12 }}>
                 <TouchableOpacity onPress={openFinishFlow} style={{ backgroundColor: colors.primary, padding:12, borderRadius:10 }}>
-                  <Text style={{ color:'#fff', fontWeight:'600', textAlign:'center' }}>Finalizar y cobrar</Text>
+                  <Text style={{ color:'#fff', fontWeight:'600', textAlign:'center' }}>Marcar finalizado</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {isProvider && status==='completed' && paymentMethod==='cash' && paymentStatus==='pending' && (
+              <View style={{ marginTop:12 }}>
+                <TouchableOpacity
+                  onPress={async () => {
+                    try {
+                      const uid = (user as any)?.uid; if (!uid) throw new Error('No autenticado');
+                      await markCashPaymentAsPaid(reservationId, uid);
+                      setReservation((prev:any)=> prev ? { ...prev, paymentStatus:'paid' } : prev);
+                      Alert.alert('Pago','Marcado como cobrado');
+                    } catch(e:any){
+                      Alert.alert('Error', e?.message || 'No se pudo marcar como cobrado');
+                    }
+                  }}
+                  style={{ backgroundColor: colors.accent, padding:12, borderRadius:10 }}>
+                  <Text style={{ color:'#fff', fontWeight:'600', textAlign:'center' }}>Marcar cobrado (efectivo)</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {showClientAuthorizeButton && (
+              <View style={{ marginTop:12 }}>
+                <TouchableOpacity
+                  disabled={clientAuthorizeDisabled}
+                  onPress={()=>{ if(!clientAuthorizeDisabled) setShowPaymentModal(true); }}
+                  style={{ backgroundColor: clientAuthorizeDisabled? colors.muted : colors.accent, padding:12, borderRadius:10, opacity: clientAuthorizeDisabled?0.7:1 }}>
+                  <Text style={{ color:'#fff', fontWeight:'600', textAlign:'center' }}>
+                    {clientAuthorizeDisabled? 'Esperando finalización del proveedor' : 'Autorizar pago'}
+                  </Text>
                 </TouchableOpacity>
               </View>
             )}
           </ScrollView>
         )}
       </View>
-      <PaymentModal visible={showPaymentModal} onClose={()=>setShowPaymentModal(false)} price={reservation?.price || reservation?.basePrice || 0} cards={cards} onConfirm={handleConfirmPayment} loading={finalizing} />
+      <PaymentModal
+        visible={showPaymentModal}
+        onClose={()=>setShowPaymentModal(false)}
+        price={reservation?.serviceSnapshot?.price || reservation?.amount || 0}
+        cards={cards}
+        onConfirm={handleConfirmPayment}
+        loading={finalizing}
+        currency='HNL'
+        currencySymbol='L'
+      />
     </View>
   );
 }

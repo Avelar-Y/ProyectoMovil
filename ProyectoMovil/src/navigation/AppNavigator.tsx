@@ -119,6 +119,8 @@ export default function AppNavigator({ isLoggedIn }: { isLoggedIn: boolean }) {
                     <Stack.Screen name="ReservationSummary" component={require('../screens/ReservationSummary').default} options={{ presentation:'modal', headerShown:false }} />
                     <Stack.Screen name="ChatRoom" component={require('../screens/ChatRoom').default} />
                     <Stack.Screen name="ProviderLiveRoute" component={require('../screens/ProviderLiveRoute').default} options={{ presentation:'modal', headerShown:false }} />
+                    <Stack.Screen name="ProviderFinanceDashboard" component={require('../screens/ProviderFinanceDashboard').default} options={{ presentation:'modal', headerShown:false }} />
+                    <Stack.Screen name="ClientFinanceHistory" component={require('../screens/ClientFinanceHistory').default} options={{ presentation:'modal', headerShown:false }} />
                 </>
             ) : (
                 <Stack.Screen name="Login" component={Login} />

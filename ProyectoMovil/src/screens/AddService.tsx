@@ -64,6 +64,15 @@ const AddService: React.FC = () => {
       Alert.alert('Validación', 'El título es obligatorio');
       return;
     }
+    if (!duration.trim()) {
+      Alert.alert('Validación', 'La duración (minutos) es obligatoria');
+      return;
+    }
+    const durNum = Number(duration);
+    if (isNaN(durNum) || durNum <= 0) {
+      Alert.alert('Validación', 'La duración debe ser un número mayor a 0');
+      return;
+    }
     setSaving(true);
     try {
       const uid = (user as any)?.uid;
@@ -81,7 +90,7 @@ const AddService: React.FC = () => {
         title: title.trim(),
         description: description.trim() || undefined,
         price: price ? Number(price) : undefined,
-        duration: duration ? Number(duration) : undefined,
+        duration: durNum,
         icon: icon.trim() || undefined,
         tags: tags ? tags.split(',').map((t: string) => t.trim()).filter(Boolean) : undefined,
         active: !!active,

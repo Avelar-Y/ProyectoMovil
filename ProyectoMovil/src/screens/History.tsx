@@ -166,14 +166,27 @@ export default function History({ navigation }: any) {
             setIsProvider(provider);
             if (provider) {
                 const items = await getReservationsByProvider(uid);
-                setReservations(items);
-                lastKnownRef.current = items;
-                persistCache(items);
+                if (items.length > 0) {
+                    setReservations(items);
+                    lastKnownRef.current = items;
+                    persistCache(items);
+                } else if (lastKnownRef.current.length > 0) {
+                    // mantener últimos conocidos; no sobrescribir con vacío accidental
+                    console.warn('History refresh: resultado vacío, conservando cache existente (provider)');
+                } else {
+                    setReservations([]); // realmente vacío inicial
+                }
             } else {
                 const res = await getReservationsForUser(user.email!);
-                setReservations(res);
-                lastKnownRef.current = res;
-                persistCache(res);
+                if (res.length > 0) {
+                    setReservations(res);
+                    lastKnownRef.current = res;
+                    persistCache(res);
+                } else if (lastKnownRef.current.length > 0) {
+                    console.warn('History refresh: resultado vacío, conservando cache existente (client)');
+                } else {
+                    setReservations([]);
+                }
             }
         } catch (e) { console.warn('History global refresh failed', e); }
     }, [user]);
@@ -281,16 +294,28 @@ export default function History({ navigation }: any) {
                                                     const uid = (user as any)?.uid;
                                                     if (uid) {
                                                         const docs = await getReservationsByProvider(uid);
-                                                        setReservations(docs);
-                                                        lastKnownRef.current = docs;
-                                                        persistCache(docs);
+                                                        if (docs.length > 0) {
+                                                            setReservations(docs);
+                                                            lastKnownRef.current = docs;
+                                                            persistCache(docs);
+                                                        } else if (lastKnownRef.current.length > 0) {
+                                                            console.warn('History pull-to-refresh vacío, preservando lista anterior (provider)');
+                                                        } else {
+                                                            setReservations([]);
+                                                        }
                                                     }
                                                 } else {
                                                     if (!user?.email) return;
                                                     const res = await getReservationsForUser(user.email);
-                                                    setReservations(res);
-                                                    lastKnownRef.current = res;
-                                                    persistCache(res);
+                                                    if (res.length > 0) {
+                                                        setReservations(res);
+                                                        lastKnownRef.current = res;
+                                                        persistCache(res);
+                                                    } else if (lastKnownRef.current.length > 0) {
+                                                        console.warn('History pull-to-refresh vacío, preservando lista anterior (client)');
+                                                    } else {
+                                                        setReservations([]);
+                                                    }
                                                 }
                                             } catch (err) { console.warn('refresh error', err); } finally { setRefreshing(false); }
                                         }}
@@ -314,7 +339,13 @@ export default function History({ navigation }: any) {
                         };
                                                 const isActive = ['pending','confirmed','in_progress'].includes(status);
                         const handlePress = () => {
+                            const paymentStatus = item.paymentStatus;
+                            const isClient = !isProvider; // historial ya distingue rol
+                            const needsPaymentAuth = isClient && status === 'completed' && paymentStatus !== 'paid';
                             if (isActive) {
+                                navigation.navigate('ActiveReservationDetail', { reservationId: item.id });
+                            } else if (needsPaymentAuth) {
+                                // Abrir detalle activo para botón Autorizar pago
                                 navigation.navigate('ActiveReservationDetail', { reservationId: item.id });
                             } else if (['completed','cancelled'].includes(status)) {
                                 navigation.navigate('ReservationSummary', { reservationId: item.id });
@@ -323,6 +354,9 @@ export default function History({ navigation }: any) {
                             }
                         };
                                                 const faded = ['completed','cancelled'].includes(status);
+                                                const isClient = !isProvider;
+                                                const paymentStatus = item.paymentStatus;
+                                                const showPendingPaymentBadge = isClient && status === 'completed' && paymentStatus !== 'paid';
                                                 return (
                                                         <TouchableOpacity style={[styles.item, { backgroundColor: colors.card, borderColor: colors.border, opacity: faded ? 0.82 : 1 }]} onPress={handlePress}>
                                 <View style={{ flexDirection:'row', justifyContent:'space-between', alignItems:'center' }}>
@@ -333,6 +367,11 @@ export default function History({ navigation }: any) {
                                 </View>
                                 <Text style={{ color: colors.muted }}>{item.name} - {item.date}</Text>
                                 {!!item.note && <Text style={[styles.note, { color: colors.muted }]} numberOfLines={2}>{item.note}</Text>}
+                                {showPendingPaymentBadge && (
+                                    <View style={{ marginTop:6, alignSelf:'flex-start', backgroundColor: colors.accent, paddingHorizontal:8, paddingVertical:4, borderRadius:8 }}>
+                                        <Text style={{ color:'#fff', fontSize:11, fontWeight:'600' }}>Pendiente de pago</Text>
+                                    </View>
+                                )}
                                 {status === 'cancelled' && !!item.cancelReason && (
                                     <Text style={{ color: colors.danger, fontSize:12, marginTop:4 }} numberOfLines={3}>Motivo: {item.cancelReason}</Text>
                                 )}

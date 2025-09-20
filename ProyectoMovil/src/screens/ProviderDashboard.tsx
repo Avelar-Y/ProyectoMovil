@@ -4,6 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import { getServicesForProvider, saveService, getReservationsByProvider, finishService, cancelReservation, setServiceActive, updateReservation, acceptReservationExclusive, startService, getUserProfile } from '../services/firestoreService';
+import { formatMoney } from '../utils/currency';
 
 interface ProviderService { id?: string; title: string; price?: number; description?: string; }
 interface ProviderReservation { id?: string; status?: string; serviceSnapshot?: any; service?: string; userEmail?: string; note?: string; }
@@ -16,7 +17,7 @@ export default function ProviderDashboard() {
   const [reservations, setReservations] = useState<ProviderReservation[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
-  const [form, setForm] = useState({ title:'', description:'', price:'', tags:'' });
+  const [form, setForm] = useState({ title:'', description:'', price:'', duration:'', tags:'' });
   const [savingService, setSavingService] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [activeReservationId, setActiveReservationId] = useState<string|null>(null);
@@ -53,6 +54,9 @@ export default function ProviderDashboard() {
 
   const onCreateService = async () => {
     if (!form.title.trim()) { Alert.alert('Falta título','Ingresa un título.'); return; }
+    if (!form.duration.trim()) { Alert.alert('Falta duración','Ingresa duración estimada en minutos.'); return; }
+    const durNum = Number(form.duration);
+    if (isNaN(durNum) || durNum <= 0) { Alert.alert('Duración inválida','La duración debe ser un número mayor a 0.'); return; }
     try {
       setSavingService(true);
       const uid = (user as any).uid;
@@ -60,12 +64,13 @@ export default function ProviderDashboard() {
         title: form.title.trim(),
         description: form.description.trim() || null,
         price: form.price ? Number(form.price) : null,
+        duration: durNum,
         tags: form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean).slice(0,6) : [],
         ownerId: uid,
         active: true,
       };
       await saveService(payload);
-      setForm({ title:'', description:'', price:'', tags:'' });
+      setForm({ title:'', description:'', price:'', duration:'', tags:'' });
       setModalVisible(false);
       load();
     } catch (e:any) {
@@ -105,7 +110,7 @@ export default function ProviderDashboard() {
     return (
       <View style={[styles.card, { backgroundColor: colors.card, opacity: active ? 1 : 0.55 }]}> 
         <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{item.title}</Text>
-        {item.price!=null && <Text style={{ color: colors.primary, fontSize:12, marginTop:4 }}>${item.price}</Text>}
+  {item.price!=null && <Text style={{ color: colors.primary, fontSize:12, marginTop:4 }}>{formatMoney(item.price, { currency: (item as any).currency || 'HNL' })}</Text>}
         <TouchableOpacity onPress={async () => {
           try {
             if (!item.id) return;
@@ -209,6 +214,7 @@ export default function ProviderDashboard() {
             <TextInput placeholder='Título' placeholderTextColor={colors.muted} value={form.title} onChangeText={t=>setForm(f=>({...f,title:t}))} style={[styles.input,{ borderColor: colors.border, color: colors.text, backgroundColor: colors.inputBg||colors.card }]} />
             <TextInput placeholder='Descripción' placeholderTextColor={colors.muted} value={form.description} onChangeText={t=>setForm(f=>({...f,description:t}))} style={[styles.input,{ borderColor: colors.border, color: colors.text, backgroundColor: colors.inputBg||colors.card }]} multiline />
             <TextInput placeholder='Precio' placeholderTextColor={colors.muted} keyboardType='numeric' value={form.price} onChangeText={t=>setForm(f=>({...f,price:t}))} style={[styles.input,{ borderColor: colors.border, color: colors.text, backgroundColor: colors.inputBg||colors.card }]} />
+            <TextInput placeholder='Duración (min)' placeholderTextColor={colors.muted} keyboardType='numeric' value={form.duration} onChangeText={t=>setForm(f=>({...f,duration:t}))} style={[styles.input,{ borderColor: colors.border, color: colors.text, backgroundColor: colors.inputBg||colors.card }]} />
             <TextInput placeholder='Tags (coma separadas)' placeholderTextColor={colors.muted} value={form.tags} onChangeText={t=>setForm(f=>({...f,tags:t}))} style={[styles.input,{ borderColor: colors.border, color: colors.text, backgroundColor: colors.inputBg||colors.card }]} />
             <View style={{ flexDirection:'row', gap:12, marginTop:4 }}>
               <TouchableOpacity disabled={savingService} onPress={()=>setModalVisible(false)} style={[styles.btn,{ backgroundColor: colors.highlight }]}> 
