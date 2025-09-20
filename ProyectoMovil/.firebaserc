@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "proyectomovil-f0490"
-  }
+    "default": "proyectomovil-f0490",
+    "proyectomovil": "proyectomovil-f0490"
+  },
+  "targets": {},
+  "etags": {}
 }
