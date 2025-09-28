@@ -8,6 +8,8 @@ import CustomButton from '../components/CustomButton';
 import { useAuth } from '../contexts/AuthContext';
 import { saveReservation, getReservationsForService, getUserProfile, updateUserProfile, getOrCreateThread, appendReservationEvent } from '../services/firestoreService';
 import { geocodeAddressHybrid } from '../services/geocodingService';
+import { requestLocationPermission } from '../services/permissions';
+import { getCurrentProviderPosition } from '../services/locationTracking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function ServiceDetail({ route, navigation }: any) {
@@ -178,16 +180,32 @@ export default function ServiceDetail({ route, navigation }: any) {
                 }
             } catch {}
 
-            // Geocodificación híbrida (Google -> fallback OSM). Si falla Google por REQUEST_DENIED aún intentará OSM.
+            // Geocodificación híbrida (Google -> fallback OSM). Si no obtenemos coordenadas intentamos GPS del dispositivo (permiso usuario).
             let geoLat: number | undefined; let geoLng: number | undefined; let formattedAddress: string | undefined; let geocodeProvider: string | undefined;
             try {
                 const geo = await geocodeAddressHybrid(addressLine, city, province, country, { useOsmFallback: true });
-                if (geo) { geoLat = geo.lat; geoLng = geo.lng; formattedAddress = geo.formattedAddress; geocodeProvider = (geo as any).source || undefined; }
-                else {
-                    console.warn('Geocoding híbrido no devolvió coordenadas (posible falta de precisión en la dirección).');
-                }
+                if (geo) { geoLat = geo.lat; geoLng = geo.lng; formattedAddress = geo.formattedAddress; geocodeProvider = (geo as any).source || 'geocode'; }
             } catch (e:any) {
-                console.warn('Geocoding híbrido falló, se continúa sin lat/lng', e?.message);
+                console.warn('Geocoding híbrido falló', e?.message);
+            }
+            if (!geoLat || !geoLng) {
+                // Fallback: usar GPS del dispositivo como ubicación aproximada del cliente.
+                try {
+                    const perm = await requestLocationPermission();
+                    if (perm.status === 'granted' || perm.status === 'limited') {
+                        const gps = await getCurrentProviderPosition();
+                        if (gps) {
+                            geoLat = gps.lat; geoLng = gps.lng; geocodeProvider = 'device_gps_fallback';
+                            console.log('[ServiceDetail] Fallback a GPS del dispositivo para coordenadas cliente');
+                        } else {
+                            console.warn('[ServiceDetail] GPS no devolvió posición');
+                        }
+                    } else {
+                        console.warn('[ServiceDetail] Permiso GPS no concedido, no se pueden establecer coordenadas');
+                    }
+                } catch (e:any) {
+                    console.warn('[ServiceDetail] Fallback GPS error', e?.message);
+                }
             }
 
             const reservationData: any = {
@@ -219,7 +237,9 @@ export default function ServiceDetail({ route, navigation }: any) {
             };
 
             if (geoLat && geoLng) {
-                reservationData.clientLocation = { lat: geoLat, lng: geoLng, updatedAt: new Date(), provider: geocodeProvider };
+                reservationData.clientLocation = { lat: geoLat, lng: geoLng, updatedAt: new Date(), source: geocodeProvider };
+            } else {
+                console.warn('[ServiceDetail] Reserva creada sin coordenadas de cliente');
             }
 
             const id = await saveReservation(reservationData);
