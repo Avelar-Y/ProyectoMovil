@@ -1,0 +1,62 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default: bloquear todo si no se definen reglas específicas
+    match /{document=**} {
+      allow read: if false;
+      allow write: if false;
+    }
+
+    // Users, reservations, services, etc. (mantener lectura autenticada provisionalmente)
+    match /reservations/{id} {
+      allow read: if request.auth != null; // TODO refinar: permitir sólo cliente o proveedor asignado
+      allow write: if false; // Escrituras críticas desde backend / transacciones en app (ajustar según necesidad real)
+    }
+    match /services/{id} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+    match /users/{id} {
+      allow read: if request.auth != null && request.auth.uid == id; // Sólo perfil propio
+      allow write: if request.auth != null && request.auth.uid == id; // Usuario puede actualizar su perfil
+    }
+
+    // Transacciones financieras: lectura restringida a involucrados
+    match /transactions/{txId} {
+      allow read: if request.auth != null && (
+        request.auth.uid == resource.data.providerId ||
+        request.auth.uid == resource.data.clientId
+      );
+      // Crear sólo si el usuario es providerId o clientId referenciado y la reserva asociada está pagada.
+      allow create: if request.auth != null
+        && request.resource.data.type == 'service_payment'
+        && (request.auth.uid == request.resource.data.providerId || request.auth.uid == request.resource.data.clientId)
+        && request.resource.data.reservationId is string
+        && request.resource.data.amountClientPaid is number
+        && request.resource.data.providerReceives is number
+        && get(/databases/$(database)/documents/reservations/$(request.resource.data.reservationId)).data.paymentStatus == 'paid'
+        && get(/databases/$(database)/documents/reservations/$(request.resource.data.reservationId)).data.userId == request.resource.data.clientId
+        && get(/databases/$(database)/documents/reservations/$(request.resource.data.reservationId)).data.providerId == request.resource.data.providerId
+        && request.resource.data.createdAtClient is number
+        && request.time == request.resource.data.createdAt; // createdAt debe ser set por serverTimestamp (aparecerá como FieldValue => esta línea es un best-effort, puede relajarse si causa conflictos)
+      allow update, delete: if false;
+    }
+
+    // Notifications (solo lectura propias)
+    match /notifications/{nid} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.to;
+      allow write: if false;
+    }
+
+    // Threads (mensajería): permitir lectura si participante, escritura mensajes validada en subcolección
+    match /threads/{threadId} {
+      allow read: if request.auth != null && request.auth.uid in resource.data.participants;
+      allow write: if false; // creación se hace vía transacción en backend/app
+      match /messages/{msgId} {
+        allow read: if request.auth != null && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participants;
+        allow create: if request.auth != null && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participants;
+        allow update, delete: if false;
+      }
+    }
+  }
+}
